@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Дело</string>
+    <string name="title_activity_main">Дело</string>
+    <string name="package_name">app.delodelai</string>
+    <string name="custom_url_scheme">app.delodelai</string>
+</resources>

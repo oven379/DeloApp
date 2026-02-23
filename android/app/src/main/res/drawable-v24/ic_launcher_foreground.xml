@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Иконка (API 24+): логотип в безопасной зоне 68dp (отступ 20dp) -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:left="28dp"
+        android:top="28dp"
+        android:right="28dp"
+        android:bottom="28dp"
+        android:gravity="center">
+        <bitmap
+            android:src="@drawable/splash"
+            android:gravity="fill"
+            android:antialias="true"
+            android:filter="true" />
+    </item>
+</layer-list>
