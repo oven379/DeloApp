@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Дело — помощник в делах. Задачи на сегодня и завтра без лишнего</title>
+  <meta name="description" content="Приложение «Дело» — ваш помощник в делах: один список на сегодня и завтра, напоминания и прогресс. Выгрузи дела из головы. Бесплатно, без рекламы и регистрации." />
+  <meta name="keywords" content="помощник в делах, список дел, задачи на сегодня, приложение для задач, напоминания, планирование дня, таск-менеджер, дела на завтра" />
+  <meta name="author" content="379team" />
+  <link rel="canonical" href="https://delodelai.ru/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Дело — помощник в делах" />
+  <meta property="og:description" content="Один список на сегодня и завтра. Напоминания и прогресс. Выгрузи дела из головы — бесплатно и без рекламы." />
+  <meta property="og:url" content="https://delodelai.ru/" />
+  <meta property="og:locale" content="ru_RU" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Дело — помощник в делах" />
+  <meta name="twitter:description" content="Один список на сегодня и завтра. Напоминания и прогресс. Бесплатно, без рекламы." />
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+  <link rel="apple-touch-icon" href="logo.png" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <link rel="stylesheet" href="styles.css?v=21" />
+  <script>
+    (function(){
+      try {
+        var t = localStorage.getItem('delo-landing-theme');
+        document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      }
+    })();
+  </script>
+</head>
+<body>
+  <header class="site-header" id="site-header">
+    <div class="container header-inner">
+      <a href="#top" class="logo" aria-label="Дело — на главную">
+        <img src="logo.png" alt="Дело" width="40" height="40" class="logo-img" />
+        <span class="logo-text">Дело</span>
+      </a>
+      <div class="header-actions">
+        <nav class="nav" id="nav">
+          <a href="#top" class="nav-back" id="back-btn" aria-label="На главную">
+            <svg class="nav-back-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          </a>
+          <a href="#features" class="nav-link">Возможности</a>
+          <a href="/my-story/" class="nav-link nav-link--story">История одного дела</a>
+          <a href="https://t.me/manager379team" target="_blank" rel="noopener" class="nav-link nav-link--support">Поддержка</a>
+        </nav>
+        <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Переключить тему">
+          <span class="icon-dark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></span>
+          <span class="icon-light" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></span>
+        </button>
+        <button type="button" class="nav-toggle" id="nav-toggle" aria-label="Открыть меню" aria-expanded="false">
+          <span class="nav-toggle-bar"></span>
+          <span class="nav-toggle-bar"></span>
+          <span class="nav-toggle-bar"></span>
+        </button>
+      </div>
+    </div>
+    <div class="scroll-progress" id="scroll-progress" role="presentation" aria-hidden="true">
+      <span class="scroll-progress__bar" id="scroll-progress-bar"></span>
+    </div>
+    <div class="nav-overlay" id="nav-overlay" aria-hidden="true"></div>
+  </header>
+
+  <main id="top">
+    <!-- 1. Захват внимания + CTA -->
+    <section class="hero">
+      <div class="container hero-inner">
+        <div class="hero-content reveal">
+          <h1 class="hero-title">Выгрузи дела из головы</h1>
+          <p class="hero-lead">
+            <strong>Помощник в делах</strong> без лишнего: один список на сегодня и завтра, напоминания и прогресс дня. Никакой рекламы и регистрации — просто открыл и записал.
+          </p>
+          <div class="hero-cta">
+            <a href="#download" class="btn btn-primary">Скачать бесплатно</a>
+            <a href="#how" class="btn btn-outline">Как работает</a>
+          </div>
+          <p class="hero-scroll-hint">Как это устроено ↓</p>
+        </div>
+        <div class="hero-visual reveal">
+          <div class="phone-mockup-wrapper">
+            <div class="phone-mockup phone-mockup--iphone">
+              <div class="phone-mockup__screen">
+                <img src="screenshots/1-dark.png" alt="Экран приложения Дело — список дел" class="phone-mockup__img screenshot-dark" loading="eager" onerror="this.parentElement.classList.add('placeholder')" />
+                <img src="screenshots/1-light.png" alt="Экран приложения Дело — список дел" class="phone-mockup__img screenshot-light" loading="eager" onerror="this.parentElement.classList.add('placeholder')" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Боль + обещание -->
+    <section class="funnel-pain">
+      <div class="container funnel-pain-inner">
+        <p class="funnel-pain-text">Заметки разбросаны, в голове каша? <strong>«Дело»</strong> — один список на сегодня и завтра. Добавил, отметил, не забыл. Так и должно быть.</p>
+      </div>
+    </section>
+
+    <!-- 3. Как это работает — два телефона -->
+    <section id="how" class="funnel-how">
+      <div class="container">
+        <h2 class="section-title reveal">Как это работает</h2>
+        <p class="section-lead reveal">Один экран. Сегодня и завтра. Напоминания и прогресс — без лишних шагов.</p>
+        <div class="funnel-how-phones">
+          <div class="phone-mockup-wrapper reveal">
+            <div class="phone-mockup phone-mockup--iphone">
+              <div class="phone-mockup__screen">
+                <img src="screenshots/1-dark.png" alt="Дело на iPhone — тёмная тема" class="phone-mockup__img screenshot-dark" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+                <img src="screenshots/1-light.png" alt="Дело на iPhone — светлая тема" class="phone-mockup__img screenshot-light" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+              </div>
+            </div>
+          </div>
+          <div class="phone-mockup-wrapper reveal">
+            <div class="phone-mockup phone-mockup--android">
+              <div class="phone-mockup__screen">
+                <img src="screenshots/4-dark.png?v=22" alt="Дело на Android — тёмная тема" class="phone-mockup__img screenshot-dark" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+                <img src="screenshots/4-light.png?v=22" alt="Дело на Android — светлая тема" class="phone-mockup__img screenshot-light" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Возможности (сильные стороны) -->
+    <section id="features" class="features">
+      <div class="container">
+        <h2 class="section-title reveal">Почему «Дело» — твой помощник</h2>
+        <p class="section-lead reveal">Минимум настроек, максимум пользы. Всё на устройстве — без облаков и подписок.</p>
+        <ul class="features-grid">
+          <li class="feature-card">
+            <span class="feature-icon" aria-hidden="true">✓</span>
+            <h3>Сегодня и завтра</h3>
+            <p>Два дня в одном приложении. Невыполненное переносится на завтра и подсвечивается.</p>
+          </li>
+          <li class="feature-card">
+            <span class="feature-icon" aria-hidden="true">🔔</span>
+            <h3>Напоминания</h3>
+            <p>На задачу или ежедневные «Утро» и «Вечер». Пресеты 09:00, 13:00, 15:00 или своё время.</p>
+          </li>
+          <li class="feature-card">
+            <span class="feature-icon" aria-hidden="true">▣</span>
+            <h3>Прогресс дня</h3>
+            <p>В шапке видно: сколько сделано и сколько осталось. Колокольчик — просроченные и напоминания.</p>
+          </li>
+          <li class="feature-card">
+            <span class="feature-icon" aria-hidden="true">☀︎</span>
+            <h3>Тема и режим</h3>
+            <p>Светлая, тёмная или «как в системе». Компактный или развёрнутый список.</p>
+          </li>
+          <li class="feature-card">
+            <span class="feature-icon feature-icon--arrows" aria-hidden="true">
+              <svg class="feature-arrow feature-arrow--up" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+              <svg class="feature-arrow feature-arrow--down" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+            </span>
+            <h3>Свайпы и порядок</h3>
+            <p>Перетаскивание дел по приоритету — меняй порядок в списке. Кнопка «Завтра» на задаче — перенести на завтра. Свайп вправо — выполнить, влево — удалить.</p>
+          </li>
+          <li class="feature-card">
+            <span class="feature-icon" aria-hidden="true">📴</span>
+            <h3>Офлайн</h3>
+            <p>Всё хранится на устройстве. Нет аккаунта и сервера — ничего не уходит в интернет.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 5. В действии — скрины в рамках по очереди -->
+    <section id="screens" class="screens-showcase">
+      <div class="container">
+        <h2 class="section-title">Посмотри в действии</h2>
+        <p class="section-lead">Список дел, напоминания и настройки — так выглядит «Дело» на телефоне.</p>
+
+        <div class="showcase-row showcase-row--reverse">
+          <div class="showcase-content">
+            <h3 class="showcase-title">Список на сегодня</h3>
+            <p>Добавляй дела, отмечай выполненное. Прогресс в шапке и напоминания на задачи — всё на одном экране.</p>
+          </div>
+          <div class="phone-mockup-wrapper">
+            <div class="phone-mockup phone-mockup--iphone">
+              <div class="phone-mockup__screen">
+                <img src="screenshots/1-dark.png" alt="Список дел на сегодня" class="phone-mockup__img screenshot-dark" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+                <img src="screenshots/1-light.png" alt="Список дел на сегодня" class="phone-mockup__img screenshot-light" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <div class="showcase-content">
+            <h3 class="showcase-title">Напоминания</h3>
+            <p>Сработавшие напоминания в одном месте. Закрыл или очистил — и снова к делам. Напоминание на день и время: в карточке дела можно задать день (Сегодня, Завтра или дату) и время. Кнопка «Напомнить» — и уведомление не даст забыть.</p>
+          </div>
+          <div class="phone-mockup-wrapper">
+            <div class="phone-mockup phone-mockup--android">
+              <div class="phone-mockup__screen">
+                <img src="screenshots/6-dark.png" alt="Панель напоминаний" class="phone-mockup__img screenshot-dark" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+                <img src="screenshots/6-light.png" alt="Панель напоминаний" class="phone-mockup__img screenshot-light" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="showcase-row showcase-row--reverse">
+          <div class="showcase-content">
+            <h3 class="showcase-title">Настройки за секунду</h3>
+            <p>Тема, режим списка и ежедневные уведомления «Утро» и «Вечер» — без лишних экранов. Два вида списка: «Компактный» и «Развёрнутый».</p>
+          </div>
+          <div class="phone-mockup-wrapper">
+            <div class="phone-mockup phone-mockup--iphone">
+              <div class="phone-mockup__screen">
+                <img src="screenshots/2-dark.png?v=15" alt="Настройки приложения — тема, режим списка, уведомления" class="phone-mockup__img screenshot-dark" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+                <img src="screenshots/2-light.png?v=15" alt="Настройки приложения — тема, режим списка, уведомления" class="phone-mockup__img screenshot-light" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="showcase-row">
+          <div class="showcase-content">
+            <h3 class="showcase-title">Календарь и точки</h3>
+            <p>«Планы на день» — календарь с навигацией по месяцам. Под датами отображаются точки: <strong>зелёная</strong> — напоминание через 7+ дней, <strong>красная</strong> — напоминание в ближайшие 7 дней, <strong>серая</strong> — день с делами без напоминания. Сразу видно, когда что запланировано.</p>
+          </div>
+          <div class="phone-mockup-wrapper">
+            <div class="phone-mockup phone-mockup--android">
+              <div class="phone-mockup__screen">
+                <img src="screenshots/3-dark.png?v=18" alt="Календарь — планы на день и точки напоминаний" class="phone-mockup__img screenshot-dark" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+                <img src="screenshots/3-light.png?v=18" alt="Календарь — планы на день и точки напоминаний" class="phone-mockup__img screenshot-light" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="showcase-row showcase-row--reverse">
+          <div class="showcase-content">
+            <h3 class="showcase-title">Уведомления</h3>
+            <p>Вкладка «Уведомления» — сработавшие напоминания в одном месте. Карточка с делом и временем, кнопка «Очистить все» — закрыл и снова к делам. Рядом вкладка «Настройки» для темы и уведомлений «Утро» и «Вечер».</p>
+          </div>
+          <div class="phone-mockup-wrapper">
+            <div class="phone-mockup phone-mockup--iphone">
+              <div class="phone-mockup__screen">
+                <img src="screenshots/6-dark.png?v=21" alt="Панель уведомлений — сработавшие напоминания" class="phone-mockup__img screenshot-dark" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+                <img src="screenshots/6-light.png?v=21" alt="Панель уведомлений — сработавшие напоминания" class="phone-mockup__img screenshot-light" loading="lazy" onerror="this.parentElement.classList.add('placeholder')" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. Частые вопросы и Скачать «Дело» -->
+    <section id="faq" class="faq faq-download">
+      <div class="container">
+        <div class="faq-download-row">
+          <div class="faq-column">
+            <h2 class="section-title reveal">Частые вопросы</h2>
+            <p class="section-lead reveal">Кратко о приложении и данных.</p>
+            <ul class="faq-list">
+              <li class="faq-item">
+                <button type="button" class="faq-question">Нужна ли регистрация?</button>
+                <p class="faq-answer">Нет. Устанавливаете приложение — и сразу пользуетесь. Аккаунт не нужен.</p>
+              </li>
+              <li class="faq-item">
+                <button type="button" class="faq-question">Где хранятся мои дела?</button>
+                <p class="faq-answer">Только на вашем телефоне. Мы не собираем и не отправляем данные на сервер. Всё остаётся у вас.</p>
+              </li>
+              <li class="faq-item">
+                <button type="button" class="faq-question">Есть ли реклама или подписка?</button>
+                <p class="faq-answer">Нет. Приложение бесплатное, без рекламы и без подписки.</p>
+              </li>
+              <li class="faq-item">
+                <button type="button" class="faq-question">Что будет с делами на завтра?</button>
+                <p class="faq-answer">Утром невыполненные дела с «Завтра» подсвечиваются как просроченные — вы видите их в колокольчике и во вкладке «Сегодня».</p>
+              </li>
+              <li class="faq-item">
+                <button type="button" class="faq-question">На каких устройствах работает «Дело»?</button>
+                <p class="faq-answer">На iPhone и Android. Скачать можно из App Store и Google Play.</p>
+              </li>
+            </ul>
+          </div>
+          <div class="download-column">
+            <div id="download" class="download-in-section">
+              <h2 class="download-title">Скачать «Дело»</h2>
+              <p class="download-lead">Бесплатно. Без подписки и рекламы.</p>
+              <p class="download-extra">Без регистрации · Данные только на устройстве</p>
+              <p class="download-cta-text">Скачай и начни вести дела без лишнего — уже сегодня.</p>
+              <div class="download-buttons">
+                <!-- После публикации заменить # на ссылку вида https://play.google.com/store/apps/details?id=app.delodelai -->
+                <a href="#" class="btn-store btn-store--play" id="btn-play" aria-label="Скачать в Google Play">
+              <span class="store-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="28" height="28"><path fill="currentColor" d="M3 20.5v-17c0-.59.34-1.11.84-1.35L13.69 12l-9.85 9.85c-.5-.24-.84-.76-.84-1.35zm13.81-5.38L6.05 21.34l14.14-14.14 4.81 2.65-7.19 3.98zm3.35-4.31L5.7 2.66l.96-.53 12.78 7.04c.68.38.68 1.32 0 1.7l-2.38 1.31z"/></svg>
+              </span>
+              <span class="store-text">
+                <span class="store-label">Доступно в</span>
+                <span class="store-name">Google Play</span>
+              </span>
+            </a>
+            <!-- После публикации заменить # на ссылку вида https://apps.apple.com/app/idXXXXXXXXX -->
+            <a href="#" class="btn-store btn-store--apple" id="btn-appstore" aria-label="Скачать в App Store">
+              <span class="store-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="28" height="28"><path fill="currentColor" d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+              </span>
+              <span class="store-text">
+                <span class="store-label">Загрузи в</span>
+                <span class="store-name">App Store</span>
+              </span>
+                </a>
+              </div>
+            </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <p class="footer-brand">Дело · Разработано <a href="https://379team.ru/" target="_blank" rel="noopener" class="footer-brand-link">379team</a></p>
+      <nav class="footer-links">
+        <a href="/privacy/">Политика конфиденциальности</a>
+      </nav>
+    </div>
+  </footer>
+  <script>
+    (function() {
+      var header = document.getElementById('site-header');
+      var toggle = document.getElementById('nav-toggle');
+      var overlay = document.getElementById('nav-overlay');
+      var nav = document.getElementById('nav');
+
+      function openMenu() {
+        header.classList.add('nav-open');
+        toggle.setAttribute('aria-label', 'Закрыть меню');
+        toggle.setAttribute('aria-expanded', 'true');
+        overlay.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+      }
+      function closeMenu() {
+        header.classList.remove('nav-open');
+        toggle.setAttribute('aria-label', 'Открыть меню');
+        toggle.setAttribute('aria-expanded', 'false');
+        overlay.setAttribute('aria-hidden', 'true');
+        document.body.style.overflow = '';
+      }
+      if (toggle) {
+        toggle.addEventListener('click', function() {
+          if (header.classList.contains('nav-open')) closeMenu();
+          else openMenu();
+        });
+      }
+      if (overlay) overlay.addEventListener('click', closeMenu);
+      if (nav) nav.querySelectorAll('.nav-link').forEach(function(a) {
+        a.addEventListener('click', closeMenu);
+      });
+      var backBtn = document.getElementById('back-btn');
+      if (backBtn) backBtn.addEventListener('click', closeMenu);
+
+      // Тема: тёмная по умолчанию, сохраняем в localStorage
+      var themeKey = 'delo-landing-theme';
+      var themeToggle = document.getElementById('theme-toggle');
+      function setTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme || 'dark');
+        try { localStorage.setItem(themeKey, theme || 'dark'); } catch (e) {}
+      }
+      function getStoredTheme() {
+        try { return localStorage.getItem(themeKey); } catch (e) { return null; }
+      }
+      var saved = getStoredTheme();
+      if (saved === 'light') setTheme('light');
+      else setTheme('dark');
+      if (themeToggle) {
+        themeToggle.addEventListener('click', function() {
+          var current = document.documentElement.getAttribute('data-theme');
+          setTheme(current === 'light' ? 'dark' : 'light');
+        });
+      }
+
+      // FAQ аккордеон
+      document.querySelectorAll('.faq-question').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var item = btn.closest('.faq-item');
+          var wasOpen = item.classList.contains('is-open');
+          document.querySelectorAll('.faq-item').forEach(function(i) { i.classList.remove('is-open'); });
+          if (!wasOpen) item.classList.add('is-open');
+        });
+      });
+
+      // Появление блоков при скролле
+      var revealEls = document.querySelectorAll('.reveal');
+      function checkReveal() {
+        var top = window.pageYOffset;
+        var vh = window.innerHeight;
+        revealEls.forEach(function(el) {
+          var rect = el.getBoundingClientRect();
+          if (rect.top < vh - 80) el.classList.add('is-visible');
+        });
+      }
+      if (revealEls.length) {
+        checkReveal();
+        window.addEventListener('scroll', checkReveal, { passive: true });
+        window.addEventListener('resize', checkReveal);
+      }
+
+      // Прогресс-бар прокрутки: линия с красного плавно замещается зелёным
+      var scrollProgressBar = document.getElementById('scroll-progress-bar');
+      function updateScrollProgress() {
+        if (!scrollProgressBar) return;
+        var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        var docHeight = document.documentElement.scrollHeight - window.innerHeight;
+        var progress = docHeight > 0 ? Math.min(1, scrollTop / docHeight) : 0;
+        scrollProgressBar.style.width = (progress * 100) + '%';
+      }
+      window.addEventListener('scroll', updateScrollProgress, { passive: true });
+      window.addEventListener('resize', updateScrollProgress);
+      updateScrollProgress();
+    })();
+  </script>
+</body>
+</html>
