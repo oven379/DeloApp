@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Экран загрузки: фон + логотип строго по центру -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Фон на весь экран -->
+    <item android:drawable="@color/splash_background" />
+    <!-- Логотип по центру: область 288dp, чтобы логотип не обрезался по краям -->
+    <item
+        android:width="288dp"
+        android:height="288dp"
+        android:gravity="center">
+        <bitmap
+            android:src="@drawable/splash"
+            android:gravity="center"
+            android:antialias="true"
+            android:filter="true" />
+    </item>
+</layer-list>
