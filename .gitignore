@@ -1,7 +1,52 @@
+# Зависимости
 node_modules/
+**/node_modules/
+
+# Сборка
+frontend/dist/
 dist/
-.DS_Store
-*.log
+app/vendor/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# Среда и секреты
 .env
+.env.*
+!.env.example
 .env.local
-.idea
+*.jks
+*.keystore
+
+# ОС
+.DS_Store
+Thumbs.db
+*.log
+
+# Laravel (app/)
+app/bootstrap/cache/*
+!app/bootstrap/cache/.gitkeep
+app/storage/logs/*
+!app/storage/logs/.gitkeep
+app/storage/framework/cache/*
+app/storage/framework/sessions/*
+app/storage/framework/views/*
+
+# Android
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/.gradle/
+*.apk
+*.aab
+
+# iOS
+frontend/ios/App/App/build/
+frontend/ios/App/build/
+*.ipa
+
+# Локальные скрипты обрезки скриншотов (при необходимости: npm install в папке)
+landing/screenshots/node_modules/
