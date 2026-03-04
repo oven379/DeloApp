@@ -6,7 +6,7 @@
  *
  * Запуск: npm run store-assets (из папки frontend)
  * Результат: папка store-assets/ в корне проекта (родитель frontend).
- * iPad Pro 13": store-assets/app-store/ipad-pro-13/ (2048×2732 px) — для загрузки в App Store Connect.
+ * iPad 12.9"/13": store-assets/app-store/ipad-pro-13/ (2064×2752 px) — для загрузки в App Store Connect.
  */
 import sharp from 'sharp';
 import path from 'path';
@@ -193,7 +193,7 @@ async function processAppStoreScreenshots() {
   console.log(`  app-store/iphone-6.5/ (${toProcess.length} шт, 1242×2688, шторка убрана)`);
 }
 
-// App Store: iPad Pro 13" (12.9" 6th gen) — 2048×2732 (portrait), обязателен для выкладки
+// App Store: iPad 12.9"/13" — допустимые размеры: 2064×2752, 2752×2064, 2048×2732, 2732×2048
 async function processAppStoreIpadPro13() {
   const outDir = path.join(storeDir, 'app-store', 'ipad-pro-13');
   await ensureDir(outDir);
@@ -215,7 +215,8 @@ async function processAppStoreIpadPro13() {
     console.warn('  app-store/ipad-pro-13: нет PNG/JPG в папке скриншотов');
     return;
   }
-  const W = 2048, H = 2732;
+  // Точные размеры по требованиям App Store: 2064×2752 px (portrait)
+  const W = 2064, H = 2752;
   const CROP_TOP_PERCENT = 0.07;
   for (let i = 0; i < toProcess.length; i++) {
     const src = path.join(srcDir, toProcess[i]);
@@ -231,7 +232,7 @@ async function processAppStoreIpadPro13() {
       .png()
       .toFile(dest);
   }
-  console.log(`  app-store/ipad-pro-13/ (${toProcess.length} шт, ${W}×${H}, iPad Pro 12.9" 6gen)`);
+  console.log(`  app-store/ipad-pro-13/ (${toProcess.length} шт, ${W}×${H} px, iPad 12.9"/13")`);
 }
 
 async function main() {
@@ -254,7 +255,7 @@ async function main() {
   console.log('\nApp Store:');
   console.log('- icon-1024.png (1024×1024, PNG, без прозрачности)');
   console.log('- app-store/iphone-6.5/ (1242×2688 px, до 10 шт)');
-  console.log('- app-store/ipad-pro-13/ (2048×2732 px, iPad Pro 13", обязателен для проверки)');
+  console.log('- app-store/ipad-pro-13/ (2064×2752 px, iPad 12.9"/13", обязателен для проверки)');
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
