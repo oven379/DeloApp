@@ -192,6 +192,35 @@ async function processAppStoreScreenshots() {
   console.log(`  app-store/iphone-6.5/ (${toProcess.length} шт, 1242×2688, шторка убрана)`);
 }
 
+// App Store: iPad Pro 13" (12.9" 6th gen) — 2048×2732 (portrait), обязателен для выкладки
+async function processAppStoreIpadPro13() {
+  const outDir = path.join(storeDir, 'app-store', 'ipad-pro-13');
+  await ensureDir(outDir);
+  if (!fs.existsSync(screenshotsSrc)) return;
+  const files = fs.readdirSync(screenshotsSrc)
+    .filter(f => (f.endsWith('.png') || f.endsWith('.jpg')) && !f.startsWith('_'));
+  const darkFirst = files.filter(f => f.includes('dark')).slice(0, 5);
+  const lightFirst = files.filter(f => f.includes('light')).slice(0, 5);
+  const toProcess = [...new Set([...darkFirst, ...lightFirst])].slice(0, 10);
+  if (toProcess.length === 0) toProcess.push(...files.slice(0, 10));
+  const W = 2048, H = 2732;
+  const CROP_TOP_PERCENT = 0.07;
+  for (let i = 0; i < toProcess.length; i++) {
+    const src = path.join(screenshotsSrc, toProcess[i]);
+    const dest = path.join(outDir, `screenshot-${i + 1}.png`);
+    const meta = await sharp(src).metadata();
+    const srcH = meta.height || 1920;
+    const cropTop = Math.round(srcH * CROP_TOP_PERCENT);
+    const extractH = srcH - cropTop;
+    await sharp(src)
+      .extract({ left: 0, top: cropTop, width: meta.width || 1080, height: extractH })
+      .resize(W, H, { fit: 'cover', position: 'top' })
+      .png()
+      .toFile(dest);
+  }
+  console.log(`  app-store/ipad-pro-13/ (${toProcess.length} шт, 2048×2732, iPad Pro 13")`);
+}
+
 async function main() {
   console.log('Создание визуальных материалов для Google Play и App Store...\n');
   if (!fs.existsSync(logoPath)) {
@@ -205,12 +234,14 @@ async function main() {
   await processScreenshots();
   await processTabletScreenshots();
   await processAppStoreScreenshots();
+  await processAppStoreIpadPro13();
   console.log('\nГотово! Папка: store-assets/');
   console.log('\nGoogle Play:');
   console.log('- icon-512.png, feature-graphic-1024x500.png, phone/');
   console.log('\nApp Store:');
   console.log('- icon-1024.png (1024×1024, PNG, без прозрачности)');
   console.log('- app-store/iphone-6.5/ (1242×2688 px, до 10 шт)');
+  console.log('- app-store/ipad-pro-13/ (2048×2732 px, iPad Pro 13", обязателен для проверки)');
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
