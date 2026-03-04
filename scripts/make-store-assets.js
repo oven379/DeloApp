@@ -2,10 +2,11 @@
  * Создаёт все визуальные материалы для Google Play и App Store:
  * - Иконка 512×512 (Play), 1024×1024 (App Store)
  * - Картинка для описания (Play) 1024×500
- * - Скриншоты: Play (phone, tablet), App Store (iPhone 6.5")
+ * - Скриншоты: Play (phone, tablet), App Store (iPhone 6.5", iPad Pro 13")
  *
- * Запуск: node scripts/make-store-assets.js
- * Результат: папка store-assets/ в корне проекта
+ * Запуск: npm run store-assets (из папки frontend)
+ * Результат: папка store-assets/ в корне проекта (родитель frontend).
+ * iPad 12.9"/13": store-assets/app-store/ipad-pro-13/ (2064×2752 px) — для загрузки в App Store Connect.
  */
 import sharp from 'sharp';
 import path from 'path';
@@ -192,6 +193,48 @@ async function processAppStoreScreenshots() {
   console.log(`  app-store/iphone-6.5/ (${toProcess.length} шт, 1242×2688, шторка убрана)`);
 }
 
+// App Store: iPad 12.9"/13" — допустимые размеры: 2064×2752, 2752×2064, 2048×2732, 2732×2048
+async function processAppStoreIpadPro13() {
+  const outDir = path.join(storeDir, 'app-store', 'ipad-pro-13');
+  await ensureDir(outDir);
+  let srcDir = screenshotsSrc;
+  if (!fs.existsSync(srcDir)) {
+    srcDir = path.join(frontendRoot, 'public', 'screenshots');
+  }
+  if (!fs.existsSync(srcDir)) {
+    console.warn('  app-store/ipad-pro-13: пропущено (нет landing/screenshots или frontend/public/screenshots)');
+    return;
+  }
+  const files = fs.readdirSync(srcDir)
+    .filter(f => (f.endsWith('.png') || f.endsWith('.jpg')) && !f.startsWith('_'));
+  const darkFirst = files.filter(f => f.includes('dark')).slice(0, 5);
+  const lightFirst = files.filter(f => f.includes('light')).slice(0, 5);
+  const toProcess = [...new Set([...darkFirst, ...lightFirst])].slice(0, 10);
+  if (toProcess.length === 0) toProcess.push(...files.slice(0, 10));
+  if (toProcess.length === 0) {
+    console.warn('  app-store/ipad-pro-13: нет PNG/JPG в папке скриншотов');
+    return;
+  }
+  // Точные размеры по требованиям App Store: 2064×2752 px (portrait)
+  const W = 2064, H = 2752;
+  const CROP_TOP_PERCENT = 0.07;
+  for (let i = 0; i < toProcess.length; i++) {
+    const src = path.join(srcDir, toProcess[i]);
+    const dest = path.join(outDir, `screenshot-${i + 1}.png`);
+    const meta = await sharp(src).metadata();
+    const srcW = meta.width || 1080;
+    const srcH = meta.height || 1920;
+    const cropTop = Math.round(srcH * CROP_TOP_PERCENT);
+    const extractH = srcH - cropTop;
+    await sharp(src)
+      .extract({ left: 0, top: cropTop, width: srcW, height: extractH })
+      .resize(W, H, { fit: 'cover', position: 'top' })
+      .png()
+      .toFile(dest);
+  }
+  console.log(`  app-store/ipad-pro-13/ (${toProcess.length} шт, ${W}×${H} px, iPad 12.9"/13")`);
+}
+
 async function main() {
   console.log('Создание визуальных материалов для Google Play и App Store...\n');
   if (!fs.existsSync(logoPath)) {
@@ -205,12 +248,14 @@ async function main() {
   await processScreenshots();
   await processTabletScreenshots();
   await processAppStoreScreenshots();
+  await processAppStoreIpadPro13();
   console.log('\nГотово! Папка: store-assets/');
   console.log('\nGoogle Play:');
   console.log('- icon-512.png, feature-graphic-1024x500.png, phone/');
   console.log('\nApp Store:');
   console.log('- icon-1024.png (1024×1024, PNG, без прозрачности)');
   console.log('- app-store/iphone-6.5/ (1242×2688 px, до 10 шт)');
+  console.log('- app-store/ipad-pro-13/ (2064×2752 px, iPad 12.9"/13", обязателен для проверки)');
 }
 
 main().catch(err => { console.error(err); process.exit(1); });
