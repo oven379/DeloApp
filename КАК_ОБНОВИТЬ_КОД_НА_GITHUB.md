@@ -2,15 +2,18 @@
 
 Пошаговая инструкция: как отправить отредактированный код в уже существующий репозиторий на GitHub.
 
+**Важно:** репозиторий Git находится в папке **frontend**. Все команды выполняйте из неё:
+`cd c:\Users\PC\Desktop\projects\cursor\DeloApp\frontend`
+
 ---
 
 ## Если выдаёт «fatal: not a git repository»
 
 Значит, в этой папке Git ещё не инициализирован (нет папки `.git`). Сделайте **один раз**:
 
-1. Перейдите в папку проекта в PowerShell:
+1. Перейдите в папку **frontend** в PowerShell:
    ```powershell
-   cd c:\Users\PC\Desktop\projects\cursor\DeloApp
+   cd c:\Users\PC\Desktop\projects\cursor\DeloApp\frontend
    ```
 
 2. Инициализировать репозиторий:
@@ -48,11 +51,11 @@
 ## 1. Открыть папку проекта в терминале
 
 1. Нажмите **Win + R**, введите `powershell` и нажмите Enter (или откройте PowerShell из меню Пуск).
-2. Перейдите в папку проекта:
+2. Перейдите в папку **frontend** (здесь находится репозиторий):
    ```powershell
-   cd c:\Users\PC\Desktop\projects\cursor\DeloApp
+   cd c:\Users\PC\Desktop\projects\cursor\DeloApp\frontend
    ```
-   Если проект лежит в другом месте — укажите свой путь вместо `c:\Users\PC\Desktop\projects\cursor\DeloApp`.
+   Если проект лежит в другом месте — укажите путь к папке, в которой есть папка `.git`.
 
 ---
 
