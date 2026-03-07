@@ -4,6 +4,7 @@
     "slug": "delo",
     "version": "1.0.0",
     "orientation": "portrait",
+    "description": "Приложение для управления делами: задачи на сегодня и завтра, напоминания, календарь.",
     "icon": "./assets/images/icon.png",
     "scheme": "app.delodelai",
     "userInterfaceStyle": "automatic",
@@ -38,12 +39,13 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "./plugins/withAndroidExported.js",
       "expo-router",
       "expo-notifications",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",

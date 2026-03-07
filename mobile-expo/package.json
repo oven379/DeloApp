@@ -4,11 +4,10 @@
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
-    "reset-project": "node ./scripts/reset-project.js",
-    "android": "expo run:android",
+    "android": "cross-env NODE_ENV=development expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "eslint app src hooks"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -47,6 +46,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "cross-env": "^7.0.3",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.9.2"

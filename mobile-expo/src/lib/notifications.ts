@@ -17,7 +17,6 @@ const OVERDUE_REMINDER_MESSAGE = 'Есть не законченные дела!
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
     shouldShowBanner: true,
     shouldShowList: true,
     shouldPlaySound: true,
@@ -107,13 +106,15 @@ export async function syncTaskReminders(tasks: Task[]) {
   await Promise.all(
     withReminder.map(async (t) => {
       await cancelTaskById(t.id);
+      const taskSummary = (t.text || 'Без названия').trim().slice(0, 80);
+      const body = taskSummary ? `Напоминание: ${taskSummary}` : 'Напоминание о деле';
       await Notifications.scheduleNotificationAsync({
         content: {
           title: APP_TITLE,
-          body: (t.text || 'Без названия').slice(0, 100),
+          body,
           data: { tag: TAG_TASK, taskId: t.id },
         },
-        trigger: { date: new Date(t.reminderAt!) , channelId: CHANNEL_ID } as any,
+        trigger: { date: new Date(t.reminderAt!), channelId: CHANNEL_ID } as any,
       });
     })
   );

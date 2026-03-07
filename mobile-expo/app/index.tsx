@@ -1,16 +1,13 @@
-import * as DocumentPicker from 'expo-document-picker';
-import { File, Paths } from 'expo-file-system';
 import * as Notifications from 'expo-notifications';
-import * as Sharing from 'expo-sharing';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
+  Dimensions,
   KeyboardAvoidingView,
   Linking,
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,14 +15,18 @@ import {
   useColorScheme,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import { CalendarList } from 'react-native-calendars';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { Ionicons } from '@expo/vector-icons';
 
 import type { DayStr, Settings, Task } from '../src/types';
-import { getSettings, getSkipDeleteConfirmUntil, getTasks, saveSettings, saveTasks } from '../src/lib/storage';
+import { DEFAULT_SETTINGS, getSettings, getSkipDeleteConfirmUntil, getTasks, saveSettings, saveTasks } from '../src/lib/storage';
 import { createTask, getCurrentDayStr, getDayStats, getTodayStats, rolloverTasks, todayStr, tomorrowStr } from '../src/lib/tasks';
 import { requestPermissions, syncDailyNotifications, syncOverdueReminder, syncTaskReminders } from '../src/lib/notifications';
+
+const WEEKDAY_SHORT = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
 
 type DayView = 'today' | 'tomorrow' | DayStr;
 
@@ -59,6 +60,56 @@ function taskSortKey(t: Task) {
   return t.order ?? 0;
 }
 
+type TextSegment =
+  | { type: 'text'; value: string }
+  | { type: 'url'; value: string }
+  | { type: 'phone'; value: string }
+  | { type: 'link'; label: string; url: string };
+
+function parseLinksAndPhones(text: string): TextSegment[] {
+  if (!text || !text.trim()) return [{ type: 'text', value: text }];
+  const all: { index: number; end: number; seg: TextSegment }[] = [];
+  let m: RegExpExecArray | null;
+
+  // [текст](url) — как в веб-версии
+  const linkRe = /\[([^\]]*)\]\(([^)]*)\)/g;
+  linkRe.lastIndex = 0;
+  while ((m = linkRe.exec(text)) !== null) {
+    const label = m[1] || m[2];
+    const url = m[2].trim();
+    if (url) all.push({ index: m.index, end: m.index + m[0].length, seg: { type: 'link', label, url } });
+  }
+
+  // URL: http(s) или www. (не внутри уже найденного []())
+  const urlRe = /https?:\/\/[^\s]+|www\.[^\s]+/gi;
+  urlRe.lastIndex = 0;
+  while ((m = urlRe.exec(text)) !== null) {
+    if (!all.some((a) => a.index <= m!.index && a.end >= m!.index + m![0].length)) {
+      all.push({ index: m.index, end: m.index + m[0].length, seg: { type: 'url', value: m[0] } });
+    }
+  }
+
+  // Телефон: +7..., 8...
+  const phoneRe = /\+?[78][\s\-\(\)]*\d[\d\s\-\(\)]{9,}/g;
+  phoneRe.lastIndex = 0;
+  while ((m = phoneRe.exec(text)) !== null) {
+    if (!all.some((a) => a.index <= m!.index && a.end >= m!.index + m![0].length)) {
+      all.push({ index: m.index, end: m.index + m[0].length, seg: { type: 'phone', value: m[0] } });
+    }
+  }
+
+  all.sort((a, b) => a.index - b.index);
+  const segments: TextSegment[] = [];
+  let last = 0;
+  for (const { index, end, seg } of all) {
+    if (index > last) segments.push({ type: 'text', value: text.slice(last, index) });
+    segments.push(seg);
+    last = end;
+  }
+  if (last < text.length) segments.push({ type: 'text', value: text.slice(last) });
+  return segments.length ? segments : [{ type: 'text', value: text }];
+}
+
 export default function DeloScreen() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [settings, setSettingsState] = useState<Settings | null>(null);
@@ -67,7 +118,6 @@ export default function DeloScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [newTaskText, setNewTaskText] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [importExportOpen, setImportExportOpen] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
@@ -81,23 +131,77 @@ export default function DeloScreen() {
   >([]);
   const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
   const [dontAskDeleteAgain, setDontAskDeleteAgain] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'notifications' | 'settings'>('settings');
+  const [thankYouVisible, setThankYouVisible] = useState(false);
 
   const addInputRef = useRef<TextInput>(null);
+  const editingTaskIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    editingTaskIdRef.current = editingTaskId;
+  }, [editingTaskId]);
+
+  function formatTimeAMPM(hour: number, minute: number) {
+    const h = hour % 12 || 12;
+    const m = String(minute).padStart(2, '0');
+    return hour < 12 ? `${h}:${m} AM` : `${h}:${m} PM`;
+  }
+
+  function formatTaskDateTime(ts: number) {
+    const d = new Date(ts);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = String(d.getFullYear()).slice(-2);
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    return `${day}.${month}.${year} · ${h}:${m}`;
+  }
+
+  function formatReminderLabel(reminderAt: number) {
+    const d = new Date(reminderAt);
+    const h = String(d.getHours()).padStart(2, '0');
+    const m = String(d.getMinutes()).padStart(2, '0');
+    const timeStr = `${h}:${m}`;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const reminderDay = new Date(d);
+    reminderDay.setHours(0, 0, 0, 0);
+    if (reminderDay.getTime() === today.getTime() || reminderDay.getTime() === tomorrow.getTime()) {
+      return `Напоминание в ${timeStr}`;
+    }
+    const day = d.getDate();
+    const month = d.toLocaleDateString('ru-RU', { month: 'short' });
+    return `Напоминание ${day} ${month} в ${timeStr}`;
+  }
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [t0, s0] = await Promise.all([getTasks(), getSettings()]);
-      if (cancelled) return;
-      const rolled = rolloverTasks(t0);
-      if (rolled !== t0) await saveTasks(rolled);
-      setTasks(rolled);
-      setSettingsState(s0);
+      try {
+        const [t0, s0] = await Promise.all([getTasks(), getSettings()]);
+        if (cancelled) return;
+        const rolled = rolloverTasks(t0);
+        if (rolled !== t0) await saveTasks(rolled);
+        setTasks(rolled);
+        setSettingsState(s0);
 
-      // Попросим разрешение и синхронизируем напоминания при первом запуске.
-      requestPermissions()
-        .then(() => Promise.all([syncTaskReminders(rolled), syncDailyNotifications(s0.dailyNotifications), syncOverdueReminder(rolled)]))
-        .catch(() => {});
+        // Попросим разрешение и синхронизируем напоминания при первом запуске.
+        requestPermissions()
+          .then(() => Promise.all([syncTaskReminders(rolled), syncDailyNotifications(s0.dailyNotifications), syncOverdueReminder(rolled)]))
+          .catch(() => {});
+
+        const response = await Notifications.getLastNotificationResponseAsync();
+        if (!cancelled && response?.notification?.request?.content?.data) {
+          const data = response.notification.request.content.data as { taskId?: string };
+          if (data.taskId && rolled.some((t) => t.id === data.taskId)) setEditingTaskId(data.taskId);
+        }
+      } catch {
+        if (!cancelled) {
+          setTasks([]);
+          setSettingsState({ ...DEFAULT_SETTINGS });
+        }
+      }
     })();
     return () => {
       cancelled = true;
@@ -129,6 +233,13 @@ export default function DeloScreen() {
         }
         return prev;
       });
+      // Если приложение открыли тапом по уведомлению о деле — открыть карточку дела (на случай, если response listener ещё не сработал).
+      Notifications.getLastNotificationResponseAsync()
+        .then((response) => {
+          const data = response?.notification?.request?.content?.data as { taskId?: string } | undefined;
+          if (data?.taskId) setEditingTaskId(data.taskId);
+        })
+        .catch(() => {});
     });
     return () => sub.remove();
   }, []);
@@ -155,6 +266,7 @@ export default function DeloScreen() {
         ...prev,
         { id: `rem_${taskId ?? 'x'}_${now}_${prev.length}`, taskId, text, firedAt: now },
       ]);
+      if (taskId) setEditingTaskId(taskId);
     });
     return () => {
       sub1.remove();
@@ -186,36 +298,38 @@ export default function DeloScreen() {
   const headerDateLabel = formatHeaderDate(dayView);
 
   const markedDates = useMemo(() => {
-    const marks: Record<string, any> = {};
-    const now = Date.now();
+    const marks: Record<string, { marked: boolean; dots: { key: string; color: string }[] }> = {};
     const today0 = new Date();
     today0.setHours(0, 0, 0, 0);
-    const in7 = new Date(today0);
-    in7.setDate(in7.getDate() + 7);
-    in7.setHours(23, 59, 59, 999);
+    const todayTime = today0.getTime();
 
+    const daysUntil = (dateStr: string) => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const t = new Date(y, m - 1, d).getTime();
+      return Math.round((t - todayTime) / (24 * 60 * 60 * 1000));
+    };
+    const dotColor = (dateStr: string) => (daysUntil(dateStr) < 7 ? '#ef4444' : '#22c55e'); // red if < 7 days until date, green if >= 7 days
+
+    // Dates with a reminder or a task: one dot — red if < 7 days until that date, green if >= 7 days
     for (const t of tasks) {
-      if (!t.forDay) continue;
-      if (!marks[t.forDay]) marks[t.forDay] = { marked: true, dots: [] as any[] };
-      // базовая точка "есть дела"
-      marks[t.forDay].dots.push({ key: `task_${t.id}`, color: colors.muted });
+      if (t.reminderAt) {
+        const ds = new Date(t.reminderAt).toISOString().slice(0, 10);
+        marks[ds] = { marked: true, dots: [{ key: 'dot', color: dotColor(ds) }] };
+      }
+      if (t.forDay && !marks[t.forDay]) {
+        marks[t.forDay] = { marked: true, dots: [{ key: 'dot', color: dotColor(t.forDay) }] };
+      }
     }
-    for (const t of tasks) {
-      if (!t.reminderAt || t.reminderAt <= now) continue;
-      const d = new Date(t.reminderAt);
-      const ds = d.toISOString().slice(0, 10);
-      if (!marks[ds]) marks[ds] = { marked: true, dots: [] as any[] };
-      const isSoon = d.getTime() <= in7.getTime();
-      marks[ds].dots.push({ key: `rem_${t.id}`, color: isSoon ? '#ef4444' : '#22c55e' });
-    }
-    // выбранный день
+    // Selected day — keep one dot, add selection
+    const cur = marks[currentDayStr];
     marks[currentDayStr] = {
-      ...(marks[currentDayStr] || {}),
+      marked: true,
+      dots: cur?.dots?.length ? cur.dots : [{ key: 'dot', color: dotColor(currentDayStr) }],
       selected: true,
       selectedColor: colors.accent,
     };
     return marks;
-  }, [tasks, currentDayStr, colors.accent, colors.muted]);
+  }, [tasks, currentDayStr, colors.accent]);
 
   const { incomplete, completed } = useMemo(() => {
     const q = (searchQuery || '').trim().toLowerCase();
@@ -239,6 +353,7 @@ export default function DeloScreen() {
   };
 
   const toggleTask = (id: string) => {
+    const wasCompleting = tasks.find((t) => t.id === id)?.completedAt == null;
     setTasks((prev) =>
       prev.map((t) =>
         t.id === id
@@ -251,6 +366,10 @@ export default function DeloScreen() {
           : t
       )
     );
+    if (wasCompleting) {
+      setThankYouVisible(true);
+      setTimeout(() => setThankYouVisible(false), 2500);
+    }
   };
 
   const updateTask = (id: string, text: string) => {
@@ -306,59 +425,41 @@ export default function DeloScreen() {
   const setTaskReminder = (id: string, reminderAt: number | null) => {
     const today = todayStr();
     const tomorrow = tomorrowStr();
-    setTasks((prev) =>
-      prev.map((t) => {
+    setTasks((prev) => {
+      const next = prev.map((t) => {
         if (t.id !== id) return t;
-        const next: Task = { ...t, reminderAt: reminderAt || null };
+        const nextTask: Task = { ...t, reminderAt: reminderAt || null };
         if (reminderAt) {
           const reminderDateStr = new Date(reminderAt).toISOString().slice(0, 10) as DayStr;
           if (reminderDateStr !== today && reminderDateStr !== tomorrow) {
-            next.forDay = reminderDateStr;
+            nextTask.forDay = reminderDateStr;
           }
         }
-        return next;
-      })
-    );
+        return nextTask;
+      });
+      syncTaskReminders(next).catch(() => {});
+      syncOverdueReminder(next).catch(() => {});
+      return next;
+    });
   };
 
-  const reorderTasks = (fromIndex: number, toIndex: number, forDay: DayStr) => {
+  const reorderTasks = (params: { from: number; to: number; data?: Task[] }, forDay: DayStr) => {
+    const { from: fromIndex, to: toIndex, data: reorderedData } = params;
     setTasks((prev) => {
       const forDayIncomplete = prev.filter((t) => t.forDay === forDay && !t.completedAt);
       const completedSameDay = prev.filter((t) => t.forDay === forDay && t.completedAt);
       const rest = prev.filter((t) => t.forDay !== forDay);
       const list = [...forDayIncomplete].sort((a, b) => taskSortKey(a) - taskSortKey(b));
-      const [removed] = list.splice(fromIndex, 1);
-      list.splice(toIndex, 0, removed);
-      const reordered = list.map((t, i) => ({ ...t, order: i }));
+      const reordered =
+        reorderedData && reorderedData.length === list.length
+          ? reorderedData.map((t, i) => ({ ...t, order: i }))
+          : (() => {
+              const [removed] = list.splice(fromIndex, 1);
+              list.splice(toIndex, 0, removed);
+              return list.map((t, i) => ({ ...t, order: i }));
+            })();
       return [...reordered, ...completedSameDay, ...rest];
     });
-  };
-
-  const onExport = async () => {
-    try {
-      const payload = JSON.stringify({ tasks, exportedAt: new Date().toISOString() }, null, 2);
-      const out = new File(Paths.cache, `delo-backup-${todayStr()}.json`);
-      out.create({ overwrite: true });
-      out.write(payload);
-      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(out.uri, { mimeType: 'application/json' });
-    } catch {}
-  };
-
-  const onImport = async () => {
-    try {
-      const res = await DocumentPicker.getDocumentAsync({ type: ['application/json'], copyToCacheDirectory: true });
-      if (res.canceled) return;
-      const file = res.assets?.[0];
-      if (!file?.uri) return;
-      const raw = await new File(file.uri).text();
-      const json = JSON.parse(raw);
-      const list: unknown = Array.isArray(json?.tasks) ? json.tasks : (Array.isArray(json) ? json : []);
-      if (Array.isArray(list) && list.length >= 0) {
-        // минимальная валидация
-        const ok = list.every((t) => t && typeof t.id === 'string' && typeof t.text === 'string');
-        if (ok) setTasks(list as Task[]);
-      }
-    } catch {}
   };
 
   const editingTask = tasks.find((t) => t.id === editingTaskId) || null;
@@ -366,17 +467,33 @@ export default function DeloScreen() {
 
   useEffect(() => {
     if (editingTaskId) {
-      setEditDraft(editingTask?.text ?? '');
-      if (editingTask?.reminderAt) setReminderTemp(new Date(editingTask.reminderAt));
+      if (!editingTask) {
+        // Сбрасываем только если задачи уже загружены и такой нет (например, удалили). Пока tasks пустой — ждём загрузки, чтобы по тапу уведомления открылась карточка.
+        if (tasks.length > 0) setEditingTaskId(null);
+        return;
+      }
+      setEditDraft(editingTask.text ?? '');
+      const base =
+        editingTask.reminderAt && editingTask.reminderAt > Date.now()
+          ? new Date(editingTask.reminderAt)
+          : new Date();
+      setReminderTemp(base);
     } else {
       setEditDraft('');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingTaskId]);
+  }, [editingTaskId, editingTask, tasks.length]);
+
+  const closeEditModal = () => {
+    if (editingTaskId && editDraft.trim() !== '') {
+      updateTask(editingTaskId, editDraft);
+    }
+    setEditingTaskId(null);
+    setReminderPickerOpen(false);
+  };
 
   if (!settings) {
     return (
-      <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]}>
+      <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={['top', 'left', 'right', 'bottom']}>
         <View style={[styles.center, { backgroundColor: colors.bg }]}>
           <Text style={{ color: colors.text }}>Загрузка…</Text>
         </View>
@@ -385,7 +502,7 @@ export default function DeloScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={['top', 'left', 'right', 'bottom']}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <View style={styles.headerTop}>
@@ -397,25 +514,33 @@ export default function DeloScreen() {
               <View style={[styles.tabs, { backgroundColor: colors.surface }]}>
                 <Pressable
                   onPress={() => setDayView('today')}
-                  style={[styles.tab, dayView === 'today' && { backgroundColor: colors.surface2 }]}>
-                  <Text style={{ color: colors.text }}>Сегодня</Text>
+                  style={[styles.tab, dayView === 'today' && { backgroundColor: colors.tabActive }]}>
+                  <Text style={{ color: colors.text, fontWeight: dayView === 'today' ? '700' : '400' }}>
+                    {settings.headerTabsStyle === 'short'
+                      ? WEEKDAY_SHORT[new Date().getDay()]
+                      : 'Сегодня'}
+                  </Text>
                 </Pressable>
                 <Pressable
                   onPress={() => setDayView('tomorrow')}
-                  style={[styles.tab, dayView === 'tomorrow' && { backgroundColor: colors.surface2 }]}>
-                  <Text style={{ color: colors.text }}>Завтра</Text>
+                  style={[styles.tab, dayView === 'tomorrow' && { backgroundColor: colors.tabActive }]}>
+                  <Text style={{ color: colors.text, fontWeight: dayView === 'tomorrow' ? '700' : '400' }}>
+                    {settings.headerTabsStyle === 'short'
+                      ? WEEKDAY_SHORT[(new Date().getDay() + 1) % 7]
+                      : 'Завтра'}
+                  </Text>
                 </Pressable>
               </View>
               <Pressable onPress={() => setCalendarOpen(true)} style={[styles.iconBtn, { backgroundColor: colors.surface }]}>
-                <Text style={{ color: colors.text }}>📅</Text>
+                <Ionicons name="calendar-outline" size={22} color={colors.text} />
               </Pressable>
               <Pressable onPress={() => setSettingsOpen(true)} style={[styles.iconBtn, { backgroundColor: colors.surface }]}>
-                <Text style={{ color: colors.text }}>⚙️</Text>
+                <Ionicons name="settings-outline" size={22} color={colors.text} />
               </Pressable>
             </View>
           </View>
           <View style={styles.progressRow}>
-            <View style={[styles.progressTrack, { backgroundColor: colors.surface }]}>
+            <View style={[styles.progressTrack, { backgroundColor: colors.overdue }]}>
               <View
                 style={[
                   styles.progressFill,
@@ -438,7 +563,7 @@ export default function DeloScreen() {
             <TextInput
               value={searchQuery}
               onChangeText={setSearchQuery}
-              placeholder="Поиск по делам…"
+              placeholder="Поиск по делам..."
               placeholderTextColor={colors.muted}
               style={[styles.search, { backgroundColor: colors.surface, color: colors.text }]}
             />
@@ -447,7 +572,7 @@ export default function DeloScreen() {
           <DraggableFlatList
             data={incomplete}
             keyExtractor={(item) => item.id}
-            onDragEnd={({ from, to }) => reorderTasks(from, to, currentDayStr)}
+            onDragEnd={(p) => reorderTasks(p, currentDayStr)}
             renderItem={({ item, drag, isActive }: RenderItemParams<Task>) => (
               <Pressable
                 onLongPress={drag}
@@ -461,27 +586,75 @@ export default function DeloScreen() {
                     opacity: isActive ? 0.7 : 1,
                   },
                 ]}>
+                <View style={styles.taskArrows}>
+                  <Text style={{ color: colors.accent, fontSize: 12 }}>▲</Text>
+                  <Text style={{ color: colors.overdue, fontSize: 12 }}>▼</Text>
+                </View>
                 <Pressable onPress={() => toggleTask(item.id)} style={[styles.check, { borderColor: colors.border }]}>
                   <Text style={{ color: colors.text }}>{item.completedAt ? '✓' : ''}</Text>
                 </Pressable>
                 <View style={styles.taskTextCol}>
                   <Text style={[styles.taskText, { color: colors.text }]} numberOfLines={3}>
-                    {item.text}
+                    {parseLinksAndPhones(item.text).map((seg, i) =>
+                      seg.type === 'text' ? (
+                        <Text key={i} style={{ color: colors.text }}>{seg.value}</Text>
+                      ) : seg.type === 'link' ? (
+                        <Text
+                          key={i}
+                          style={{ color: colors.link, textDecorationLine: 'underline' }}
+                          onPress={() => {
+                            const url = seg.url.startsWith('http') ? seg.url : `https://${seg.url}`;
+                            Linking.openURL(url).catch(() => {});
+                          }}>
+                          {seg.label}
+                        </Text>
+                      ) : seg.type === 'url' ? (
+                        <Text
+                          key={i}
+                          style={{ color: colors.link, textDecorationLine: 'underline' }}
+                          onPress={() => {
+                            const url = seg.value.startsWith('http') ? seg.value : `https://${seg.value}`;
+                            Linking.openURL(url).catch(() => {});
+                          }}>
+                          {seg.value}
+                        </Text>
+                      ) : (
+                        <Text
+                          key={i}
+                          style={{ color: colors.link, textDecorationLine: 'underline' }}
+                          onPress={() => Linking.openURL(`tel:${seg.value.replace(/\D/g, '')}`).catch(() => {})}>
+                          {seg.value}
+                        </Text>
+                      )
+                    )}
                   </Text>
-                  {!!item.reminderAt && item.reminderAt > Date.now() && (
-                    <Text style={[styles.taskMeta, { color: colors.muted }]}>
-                      ⏰ {new Date(item.reminderAt).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
-                    </Text>
-                  )}
+                  <Text style={[styles.taskMeta, { color: (item.reminderAt && item.reminderAt > Date.now()) ? colors.accent : colors.muted }]}>
+                    {(item.reminderAt && item.reminderAt > Date.now())
+                      ? formatReminderLabel(item.reminderAt)
+                      : formatTaskDateTime(item.createdAt)}
+                  </Text>
                 </View>
-                {dayView === 'today' && currentDayStr === todayStr() && (
-                  <Pressable onPress={() => handlePostponePress(item)} style={styles.smallBtn}>
-                    <Text style={{ color: colors.muted }}>→</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Pressable
+                    onPress={(e) => {
+                      e?.stopPropagation?.();
+                      setEditingTaskId(item.id);
+                    }}
+                    style={styles.smallBtn}
+                    hitSlop={8}>
+                    <Text style={{ color: item.reminderAt && item.reminderAt > Date.now() ? colors.accent : colors.muted, fontSize: 14 }}>🕐</Text>
                   </Pressable>
-                )}
-                <Pressable onPress={() => deleteTask(item.id)} style={styles.smallBtn}>
-                  <Text style={{ color: colors.muted }}>🗑️</Text>
-                </Pressable>
+                  {dayView === 'today' && currentDayStr === todayStr() && (
+                    <Pressable
+                      onPress={() => handlePostponePress(item)}
+                      style={[styles.smallBtn, { backgroundColor: colors.surface2 }]}>
+                      <Text style={{ color: colors.text, fontSize: 12 }}>Завтра</Text>
+                    </Pressable>
+                  )}
+                  <Pressable onPress={() => deleteTask(item.id)} style={styles.smallBtn}>
+                    <Text style={{ color: colors.muted }}>🗑️</Text>
+                  </Pressable>
+                </View>
               </Pressable>
             )}
             ListEmptyComponent={
@@ -520,7 +693,38 @@ export default function DeloScreen() {
                     <Text style={{ color: colors.text }}>✓</Text>
                   </Pressable>
                   <Text style={[styles.taskText, { color: colors.text, textDecorationLine: 'line-through', flex: 1 }]} numberOfLines={2}>
-                    {t.text}
+                    {parseLinksAndPhones(t.text).map((seg, i) =>
+                      seg.type === 'text' ? (
+                        <Text key={i} style={{ color: colors.text, textDecorationLine: 'line-through' }}>{seg.value}</Text>
+                      ) : seg.type === 'link' ? (
+                        <Text
+                          key={i}
+                          style={{ color: colors.link, textDecorationLine: 'underline' }}
+                          onPress={() => {
+                            const url = seg.url.startsWith('http') ? seg.url : `https://${seg.url}`;
+                            Linking.openURL(url).catch(() => {});
+                          }}>
+                          {seg.label}
+                        </Text>
+                      ) : seg.type === 'url' ? (
+                        <Text
+                          key={i}
+                          style={{ color: colors.link, textDecorationLine: 'underline' }}
+                          onPress={() => {
+                            const url = seg.value.startsWith('http') ? seg.value : `https://${seg.value}`;
+                            Linking.openURL(url).catch(() => {});
+                          }}>
+                          {seg.value}
+                        </Text>
+                      ) : (
+                        <Text
+                          key={i}
+                          style={{ color: colors.link, textDecorationLine: 'underline' }}
+                          onPress={() => Linking.openURL(`tel:${seg.value.replace(/\D/g, '')}`).catch(() => {})}>
+                          {seg.value}
+                        </Text>
+                      )
+                    )}
                   </Text>
                   <Pressable onPress={() => deleteTask(t.id)} style={styles.smallBtn}>
                     <Text style={{ color: colors.muted }}>🗑️</Text>
@@ -565,28 +769,31 @@ export default function DeloScreen() {
           </Pressable>
         </View>
 
-        {/* Calendar modal */}
+        {/* Calendar modal — одинаковые отступы от краёв окна */}
         <Modal visible={calendarOpen} animationType="slide" transparent onRequestClose={() => setCalendarOpen(false)}>
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalSheet, { backgroundColor: colors.bg }]}>
+            <View style={[styles.modalSheet, styles.calendarSheet, { backgroundColor: colors.bg, height: '85%', overflow: 'hidden' }]}>
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Планы на день</Text>
                 <Pressable onPress={() => setCalendarOpen(false)}>
                   <Text style={{ color: colors.muted, fontSize: 18 }}>✕</Text>
                 </Pressable>
               </View>
-              <CalendarList
-                pastScrollRange={0}
-                futureScrollRange={36}
-                onDayPress={(d) => {
-                  const ds = d.dateString as DayStr;
-                  setDayView(ds);
-                  setCalendarOpen(false);
-                }}
-                markingType="multi-dot"
-                markedDates={markedDates}
-                theme={{
-                  calendarBackground: colors.bg,
+              <View style={[styles.calendarListWrap, { overflow: 'hidden' }]}>
+                <CalendarList
+                  pastScrollRange={0}
+                  futureScrollRange={36}
+                  onDayPress={(d) => {
+                    const ds = d.dateString as DayStr;
+                    setDayView(ds);
+                    setCalendarOpen(false);
+                  }}
+                  markingType="multi-dot"
+                  markedDates={markedDates}
+                  style={styles.calendarListOuter}
+                  calendarStyle={styles.calendarListInner}
+                  theme={{
+                  calendarBackground: 'transparent',
                   dayTextColor: colors.text,
                   monthTextColor: colors.text,
                   textDisabledColor: colors.muted,
@@ -594,261 +801,360 @@ export default function DeloScreen() {
                   selectedDayTextColor: '#fff',
                   todayTextColor: colors.accent,
                   arrowColor: colors.text,
+                  weekVerticalMargin: 4,
                 }}
-              />
+                />
+              </View>
+              <View style={styles.calendarLegend}>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>
+                  Красная точка — до даты остаётся меньше 7 дней.
+                </Text>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>
+                  Зелёная — до даты остаётся 7 дней и больше.
+                </Text>
+              </View>
             </View>
           </View>
         </Modal>
 
-        {/* Settings modal */}
+        {/* Settings modal — вкладки Уведомления / Настройки, как на референсе */}
         <Modal visible={settingsOpen} animationType="slide" transparent onRequestClose={() => setSettingsOpen(false)}>
           <View style={styles.modalOverlay}>
             <View style={[styles.modalSheet, { backgroundColor: colors.bg }]}>
-              <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>Настройки</Text>
+              <View style={[styles.modalHeader, { borderBottomWidth: 1, borderBottomColor: colors.border, paddingBottom: 12 }]}>
+                <View style={{ flexDirection: 'row', gap: 20 }}>
+                  <Pressable onPress={() => setSettingsTab('notifications')}>
+                    <Text
+                      style={{
+                        fontSize: 16,
+                        fontWeight: settingsTab === 'notifications' ? '700' : '400',
+                        color: settingsTab === 'notifications' ? colors.text : colors.muted,
+                        borderBottomWidth: settingsTab === 'notifications' ? 2 : 0,
+                        borderBottomColor: colors.accent,
+                        paddingBottom: 4,
+                      }}>
+                      Уведомления
+                    </Text>
+                  </Pressable>
+                  <Pressable onPress={() => setSettingsTab('settings')}>
+                    <Text
+                      style={{
+                        fontSize: 16,
+                        fontWeight: settingsTab === 'settings' ? '700' : '400',
+                        color: settingsTab === 'settings' ? colors.text : colors.muted,
+                        borderBottomWidth: settingsTab === 'settings' ? 2 : 0,
+                        borderBottomColor: colors.accent,
+                        paddingBottom: 4,
+                      }}>
+                      Настройки
+                    </Text>
+                  </Pressable>
+                </View>
                 <Pressable onPress={() => setSettingsOpen(false)}>
                   <Text style={{ color: colors.muted, fontSize: 18 }}>✕</Text>
                 </Pressable>
               </View>
               <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-                <Text style={[styles.sectionTitle, { color: colors.muted, marginTop: 0 }]}>Уведомления</Text>
-                {reminderNotifications.length === 0 ? (
-                  <Text style={{ color: colors.muted }}>Здесь будут ваши напоминания.</Text>
+                {settingsTab === 'notifications' ? (
+                  <>
+                    <Text style={[styles.sectionTitle, { color: colors.muted, marginTop: 0 }]}>УВЕДОМЛЕНИЯ</Text>
+                    {reminderNotifications.length === 0 ? (
+                      <Text style={{ color: colors.muted }}>Здесь будут ваши напоминания.</Text>
+                    ) : (
+                      <>
+                        {reminderNotifications.slice(-8).reverse().map((n) => (
+                          <View key={n.id} style={[styles.slotRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                            <Text style={{ color: colors.text, flex: 1 }} numberOfLines={2}>
+                              {n.text}
+                            </Text>
+                            <Text style={{ color: colors.muted }}>
+                              {new Date(n.firedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                          </View>
+                        ))}
+                        <Pressable onPress={() => setReminderNotifications([])} style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
+                          <Text style={{ color: colors.text }}>Очистить все</Text>
+                        </Pressable>
+                      </>
+                    )}
+                  </>
                 ) : (
                   <>
-                    {reminderNotifications.slice(-8).reverse().map((n) => (
-                      <View key={n.id} style={[styles.slotRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-                        <Text style={{ color: colors.text, flex: 1 }} numberOfLines={2}>
-                          {n.text}
-                        </Text>
-                        <Text style={{ color: colors.muted }}>
-                          {new Date(n.firedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                        </Text>
-                      </View>
-                    ))}
-                    <Pressable onPress={() => setReminderNotifications([])} style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                      <Text style={{ color: colors.text }}>Очистить</Text>
-                    </Pressable>
-                  </>
-                )}
+                    <Text style={[styles.sectionTitle, { color: colors.muted, marginTop: 0 }]}>ТЕМА</Text>
+                    <View style={styles.row}>
+                      {(['light', 'dark', 'system'] as const).map((t) => (
+                        <Pressable
+                          key={t}
+                          onPress={() => {
+                            setSettingsState((s) => (s ? { ...s, theme: t } : s));
+                          }}
+                          style={[styles.chip, { backgroundColor: settings.theme === t ? colors.accent : colors.surface }]}>
+                          <Text style={{ color: settings.theme === t ? '#fff' : colors.text }}>
+                            {t === 'light' ? 'Светлая' : t === 'dark' ? 'Тёмная' : 'Моя'}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
 
-                <Text style={[styles.sectionTitle, { color: colors.muted }]}>Тема</Text>
-                <View style={styles.row}>
-                  {(['light', 'dark', 'system'] as const).map((t) => (
-                    <Pressable
-                      key={t}
-                      onPress={() => setSettingsState((s) => (s ? { ...s, theme: t } : s))}
-                      style={[
-                        styles.chip,
-                        { backgroundColor: settings.theme === t ? colors.surface2 : colors.surface },
-                      ]}>
-                      <Text style={{ color: colors.text }}>{t === 'light' ? 'Светлая' : t === 'dark' ? 'Тёмная' : 'Моя'}</Text>
-                    </Pressable>
-                  ))}
-                </View>
+                    <Text style={[styles.sectionTitle, { color: colors.muted }]}>КНОПКИ СЕГОДНЯ / ЗАВТРА</Text>
+                    <View style={styles.row}>
+                      {(['full', 'short'] as const).map((tabsStyle) => (
+                        <Pressable
+                          key={tabsStyle}
+                          onPress={() => setSettingsState((s) => (s ? { ...s, headerTabsStyle: tabsStyle } : s))}
+                          style={[styles.chip, { backgroundColor: (settings.headerTabsStyle ?? 'full') === tabsStyle ? colors.accent : colors.surface }]}>
+                          <Text style={{ color: (settings.headerTabsStyle ?? 'full') === tabsStyle ? '#fff' : colors.text }}>
+                            {tabsStyle === 'full' ? 'Сегодня / Завтра' : 'ПН / ВТ'}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
 
-                <Text style={[styles.sectionTitle, { color: colors.muted }]}>Режим списка</Text>
-                <View style={styles.row}>
-                  {(['compact', 'expanded'] as const).map((m) => (
-                    <Pressable
-                      key={m}
-                      onPress={() => setSettingsState((s) => (s ? { ...s, listMode: m } : s))}
-                      style={[
-                        styles.chip,
-                        { backgroundColor: settings.listMode === m ? colors.surface2 : colors.surface },
-                      ]}>
-                      <Text style={{ color: colors.text }}>{m === 'compact' ? 'Компактный' : 'Развёрнутый'}</Text>
-                    </Pressable>
-                  ))}
-                </View>
+                    <Text style={[styles.sectionTitle, { color: colors.muted }]}>РЕЖИМ СПИСКА</Text>
+                    <View style={styles.row}>
+                      {(['compact', 'expanded'] as const).map((m) => (
+                        <Pressable
+                          key={m}
+                          onPress={() => setSettingsState((s) => (s ? { ...s, listMode: m } : s))}
+                          style={[styles.chip, { backgroundColor: settings.listMode === m ? colors.accent : colors.surface }]}>
+                          <Text style={{ color: settings.listMode === m ? '#fff' : colors.text }}>
+                            {m === 'compact' ? 'Компактный' : 'Развёрнутый'}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
 
-                <Text style={[styles.sectionTitle, { color: colors.muted }]}>Ежедневные уведомления</Text>
-                {(settings.dailyNotifications || []).slice(0, 2).map((slot, idx) => (
-                  <View key={idx} style={[styles.slotRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-                    <Text style={{ color: colors.text, fontWeight: '600' }}>{idx === 0 ? 'Утро' : 'Вечер'}</Text>
-                    <Text style={{ color: colors.muted }}>{String(slot.hour).padStart(2, '0')}:{String(slot.minute).padStart(2, '0')}</Text>
-                    <Pressable
-                      onPress={() => {
-                        const d = new Date();
-                        d.setHours(slot.hour ?? 9, slot.minute ?? 0, 0, 0);
-                        setDailyTimeTemp(d);
-                        setDailyTimePickerIdx(idx);
-                      }}
-                      style={[styles.chip, { backgroundColor: colors.surface2 }]}>
-                      <Text style={{ color: colors.text }}>Время</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() =>
-                        setSettingsState((s) => {
-                          if (!s) return s;
-                          const next = [...s.dailyNotifications];
-                          next[idx] = { ...next[idx], enabled: !(slot.enabled !== false) };
-                          return { ...s, dailyNotifications: next };
-                        })
-                      }
-                      style={[styles.chip, { backgroundColor: slot.enabled !== false ? colors.surface2 : colors.surface }]}>
-                      <Text style={{ color: colors.text }}>{slot.enabled !== false ? 'Вкл' : 'Выкл'}</Text>
-                    </Pressable>
-                  </View>
-                ))}
-
-                {dailyTimePickerIdx != null && (
-                  <View style={{ marginTop: 6 }}>
-                    <DateTimePicker
-                      value={dailyTimeTemp}
-                      mode="time"
-                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                      onChange={(event: DateTimePickerEvent, date?: Date) => {
-                        if (Platform.OS === 'android') {
-                          if (event.type === 'dismissed') {
-                            setDailyTimePickerIdx(null);
-                            return;
-                          }
-                        }
-                        if (date) setDailyTimeTemp(date);
-                        if (Platform.OS === 'android') {
-                          const hh = (date ?? dailyTimeTemp).getHours();
-                          const mm = (date ?? dailyTimeTemp).getMinutes();
-                          const idx = dailyTimePickerIdx;
-                          setSettingsState((s) => {
-                            if (!s) return s;
-                            const next = [...s.dailyNotifications];
-                            next[idx] = { ...next[idx], hour: hh, minute: mm };
-                            return { ...s, dailyNotifications: next };
-                          });
-                          setDailyTimePickerIdx(null);
-                        }
-                      }}
-                    />
-                    {Platform.OS === 'ios' && (
-                      <View style={[styles.row, { marginTop: 10 }]}>
+                    <Text style={[styles.sectionTitle, { color: colors.muted }]}>ЕЖЕДНЕВНЫЕ УВЕДОМЛЕНИЯ (РАЗ В ДЕНЬ)</Text>
+                    {(settings.dailyNotifications || []).slice(0, 2).map((slot, idx) => (
+                      <View key={idx} style={[styles.slotRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          <Pressable
+                            onPress={() =>
+                              setSettingsState((s) => {
+                                if (!s) return s;
+                                const next = [...s.dailyNotifications];
+                                next[idx] = { ...next[idx], enabled: !(slot.enabled !== false) };
+                                return { ...s, dailyNotifications: next };
+                              })
+                            }>
+                            <Text style={{ color: colors.text, fontSize: 16 }}>
+                              {slot.enabled !== false ? '☑' : '☐'} {idx === 0 ? 'Утро' : 'Вечер'}
+                            </Text>
+                          </Pressable>
+                        </View>
                         <Pressable
                           onPress={() => {
-                            const hh = dailyTimeTemp.getHours();
-                            const mm = dailyTimeTemp.getMinutes();
-                            const idx = dailyTimePickerIdx;
-                            setSettingsState((s) => {
-                              if (!s) return s;
-                              const next = [...s.dailyNotifications];
-                              next[idx] = { ...next[idx], hour: hh, minute: mm };
-                              return { ...s, dailyNotifications: next };
-                            });
-                            setDailyTimePickerIdx(null);
+                            const d = new Date();
+                            d.setHours(slot.hour ?? 9, slot.minute ?? 0, 0, 0);
+                            setDailyTimeTemp(d);
+                            setDailyTimePickerIdx(idx);
                           }}
-                          style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
-                          <Text style={{ color: '#fff' }}>Готово</Text>
-                        </Pressable>
-                        <Pressable onPress={() => setDailyTimePickerIdx(null)} style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                          <Text style={{ color: colors.text }}>Отмена</Text>
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Text style={{ color: colors.text }}>
+                            {formatTimeAMPM(slot.hour ?? 9, slot.minute ?? 0)}
+                          </Text>
+                          <Text style={{ color: colors.muted }}>▼</Text>
                         </Pressable>
                       </View>
-                    )}
-                  </View>
-                )}
+                    ))}
 
-                <Pressable onPress={() => setImportExportOpen(true)} style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                  <Text style={{ color: colors.text }}>Импорт / Экспорт</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => Linking.openURL('https://delodelai.ru').catch(() => {})}
-                  style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                  <Text style={{ color: colors.text }}>Поддержка: delodelai.ru</Text>
-                </Pressable>
-                <Text style={{ color: colors.muted, marginTop: 12 }}>Версия 1.0.0</Text>
+                    {dailyTimePickerIdx != null && (
+                      <View style={{ marginTop: 6 }}>
+                        <DateTimePicker
+                          value={dailyTimeTemp}
+                          mode="time"
+                          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          onChange={(event: DateTimePickerEvent, date?: Date) => {
+                            if (Platform.OS === 'android') {
+                              if (event.type === 'dismissed') {
+                                setDailyTimePickerIdx(null);
+                                return;
+                              }
+                            }
+                            if (date) setDailyTimeTemp(date);
+                            if (Platform.OS === 'android') {
+                              const hh = (date ?? dailyTimeTemp).getHours();
+                              const mm = (date ?? dailyTimeTemp).getMinutes();
+                              const idx = dailyTimePickerIdx;
+                              setSettingsState((s) => {
+                                if (!s) return s;
+                                const next = [...s.dailyNotifications];
+                                next[idx] = { ...next[idx], hour: hh, minute: mm };
+                                return { ...s, dailyNotifications: next };
+                              });
+                              setDailyTimePickerIdx(null);
+                            }
+                          }}
+                        />
+                        {Platform.OS === 'ios' && (
+                          <View style={[styles.row, { marginTop: 10 }]}>
+                            <Pressable
+                              onPress={() => {
+                                const hh = dailyTimeTemp.getHours();
+                                const mm = dailyTimeTemp.getMinutes();
+                                const idx = dailyTimePickerIdx;
+                                setSettingsState((s) => {
+                                  if (!s) return s;
+                                  const next = [...s.dailyNotifications];
+                                  next[idx] = { ...next[idx], hour: hh, minute: mm };
+                                  return { ...s, dailyNotifications: next };
+                                });
+                                setDailyTimePickerIdx(null);
+                              }}
+                              style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
+                              <Text style={{ color: '#fff' }}>Готово</Text>
+                            </Pressable>
+                            <Pressable onPress={() => setDailyTimePickerIdx(null)} style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
+                              <Text style={{ color: colors.text }}>Отмена</Text>
+                            </Pressable>
+                          </View>
+                        )}
+                      </View>
+                    )}
+
+                    <View style={{ marginTop: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                      <View>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>Разработано 379team</Text>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>Версия 1.0.0</Text>
+                      </View>
+                      <Pressable
+                        onPress={() => Linking.openURL('https://delodelai.ru').catch(() => {})}
+                        style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
+                        <Text style={{ color: colors.text }}>Поддержка</Text>
+                      </Pressable>
+                    </View>
+                  </>
+                )}
               </ScrollView>
             </View>
           </View>
         </Modal>
 
-        {/* Import/export modal */}
-        <Modal visible={importExportOpen} animationType="slide" transparent onRequestClose={() => setImportExportOpen(false)}>
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalSheet, { backgroundColor: colors.bg }]}>
-              <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>Импорт / Экспорт</Text>
-                <Pressable onPress={() => setImportExportOpen(false)}>
-                  <Text style={{ color: colors.muted, fontSize: 18 }}>✕</Text>
-                </Pressable>
-              </View>
-              <View style={{ gap: 12 }}>
-                <Pressable onPress={onExport} style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
-                  <Text style={{ color: '#fff' }}>Экспортировать JSON</Text>
-                </Pressable>
-                <Pressable onPress={onImport} style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                  <Text style={{ color: colors.text }}>Импортировать JSON</Text>
-                </Pressable>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
-        {/* Edit task modal */}
-        <Modal visible={!!editingTaskId} animationType="slide" transparent onRequestClose={() => setEditingTaskId(null)}>
+        {/* Edit task modal — текст сохраняется при закрытии (крестик/назад); в блоке напоминания только Напомнить/Убрать */}
+        <Modal visible={!!editingTaskId && !!editingTask} animationType="slide" transparent onRequestClose={closeEditModal}>
           <View style={styles.modalOverlay}>
             <View style={[styles.modalSheet, { backgroundColor: colors.bg }]}>
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Редактировать</Text>
-                <Pressable onPress={() => setEditingTaskId(null)}>
+                <Pressable onPress={closeEditModal}>
                   <Text style={{ color: colors.muted, fontSize: 18 }}>✕</Text>
                 </Pressable>
               </View>
+              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
               <TextInput
                 value={editDraft}
                 onChangeText={setEditDraft}
                 multiline
                 style={[styles.editInput, { backgroundColor: colors.surface, color: colors.text }]}
               />
-              <View style={{ marginTop: 12, gap: 10 }}>
-                <Text style={[styles.sectionTitle, { color: colors.muted, marginTop: 0 }]}>Напоминание</Text>
-                {!!editingTask?.reminderAt && editingTask.reminderAt > Date.now() ? (
-                  <Text style={{ color: colors.muted }}>
-                    ⏰ {new Date(editingTask.reminderAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                  </Text>
-                ) : (
-                  <Text style={{ color: colors.muted }}>Нет напоминания</Text>
-                )}
-                <View style={styles.row}>
-                  {[
-                    { label: 'Сегодня 09:00', day: 0, h: 9, m: 0 },
-                    { label: 'Сегодня 13:00', day: 0, h: 13, m: 0 },
-                    { label: 'Сегодня 15:00', day: 0, h: 15, m: 0 },
-                    { label: 'Завтра 09:00', day: 1, h: 9, m: 0 },
-                  ].map((p) => (
-                    <Pressable
-                      key={p.label}
-                      onPress={() => {
-                        const d = new Date();
-                        d.setDate(d.getDate() + p.day);
-                        d.setHours(p.h, p.m, 0, 0);
-                        if (d.getTime() <= Date.now()) d.setMinutes(d.getMinutes() + 1);
-                        setTaskReminder(editingTaskId!, d.getTime());
-                      }}
-                      style={[styles.chip, { backgroundColor: colors.surface }]}>
-                      <Text style={{ color: colors.text }}>{p.label}</Text>
-                    </Pressable>
-                  ))}
+              <Text style={{ color: colors.muted, fontSize: 12, marginTop: 4 }}>
+                Выберите день и время ниже, затем нажмите «Напомнить».
+              </Text>
+              {(() => {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const tomorrow = new Date(today);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const rtDay = new Date(reminderTemp);
+                rtDay.setHours(0, 0, 0, 0);
+                const dayMode: 'Сегодня' | 'Завтра' | 'Дата' =
+                  rtDay.getTime() === today.getTime() ? 'Сегодня' : rtDay.getTime() === tomorrow.getTime() ? 'Завтра' : 'Дата';
+                const h = reminderTemp.getHours();
+                const m = reminderTemp.getMinutes();
+                const timePreset =
+                  h === 9 && m === 0 ? '09:00' : h === 13 && m === 0 ? '13:00' : h === 15 && m === 0 ? '15:00' : 'Другое';
+                return (
+                  <View style={{ marginTop: 12, gap: 12 }}>
+                    <Text style={[styles.sectionTitle, { color: colors.muted, marginTop: 0 }]}>День</Text>
+                    <View style={styles.row}>
+                      {(['Сегодня', 'Завтра', 'Дата'] as const).map((label) => (
+                        <Pressable
+                          key={label}
+                          onPress={() => {
+                            const d = new Date(reminderTemp);
+                            if (label === 'Сегодня') {
+                              const t = new Date();
+                              d.setFullYear(t.getFullYear(), t.getMonth(), t.getDate());
+                            } else if (label === 'Завтра') {
+                              const t = new Date();
+                              t.setDate(t.getDate() + 1);
+                              d.setFullYear(t.getFullYear(), t.getMonth(), t.getDate());
+                            } else {
+                              setReminderPickerOpen(true);
+                              setReminderAndroidMode('date');
+                              return;
+                            }
+                            setReminderTemp(d);
+                          }}
+                          style={[styles.chip, { backgroundColor: dayMode === label ? colors.accent : colors.surface }]}>
+                          <Text style={{ color: dayMode === label ? '#fff' : colors.text }}>{label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                    <Text style={[styles.sectionTitle, { color: colors.muted }]}>Время</Text>
+                    <View style={styles.row}>
+                      {[
+                        { label: '09:00', h: 9, m: 0 },
+                        { label: '13:00', h: 13, m: 0 },
+                        { label: '15:00', h: 15, m: 0 },
+                        { label: 'Другое', h: null, m: null },
+                      ].map((p) => (
+                        <Pressable
+                          key={p.label}
+                          onPress={() => {
+                            if (p.h === null) {
+                              setReminderPickerOpen(true);
+                              setReminderAndroidMode('time');
+                              return;
+                            }
+                            const d = new Date(reminderTemp);
+                            d.setHours(p.h!, p.m!, 0, 0);
+                            setReminderTemp(d);
+                          }}
+                          style={[styles.chip, { backgroundColor: timePreset === p.label ? colors.accent : colors.surface }]}>
+                          <Text style={{ color: timePreset === p.label ? '#fff' : colors.text }}>{p.label}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                );
+              })()}
+              {reminderTemp.getTime() <= Date.now() && (
+                <View style={{ backgroundColor: colors.overdue, padding: 10, borderRadius: 10, marginTop: 12 }}>
+                  <Text style={{ color: '#fff', fontSize: 13 }}>Прошедшую дату установить нельзя</Text>
                 </View>
-                <View style={styles.row}>
-                  <Pressable
-                    onPress={() => {
-                      const base = editingTask?.reminderAt ? new Date(editingTask.reminderAt) : new Date();
-                      const d = new Date(base);
-                      if (!editingTask?.reminderAt) d.setMinutes(d.getMinutes() + 10);
-                      setReminderTemp(d);
-                      setReminderPickerOpen(true);
-                      setReminderAndroidMode('date');
-                    }}
-                    style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                    <Text style={{ color: colors.text }}>Выбрать дату/время…</Text>
-                  </Pressable>
-                  {!!editingTask?.reminderAt && (
-                    <Pressable
-                      onPress={() => setTaskReminder(editingTaskId!, null)}
-                      style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                      <Text style={{ color: colors.text }}>Убрать</Text>
-                    </Pressable>
-                  )}
-                </View>
+              )}
+              <View style={[styles.row, { marginTop: 12 }]}>
+                <Pressable
+                  onPress={() => {
+                    const id = editingTaskIdRef.current ?? editingTaskId;
+                    if (!id) return;
+                    const ts = reminderTemp.getTime();
+                    setReminderPickerOpen(false);
+                    const now = Date.now();
+                    if (ts > now) {
+                      setTaskReminder(id, ts);
+                    } else {
+                      setTaskReminder(id, now + 60000);
+                    }
+                    setEditingTaskId(null);
+                  }}
+                  style={[styles.primaryBtn, { backgroundColor: colors.accent }]}
+                  android_ripple={{ color: 'rgba(255,255,255,0.3)' }}>
+                  <Text style={{ color: '#fff' }}>Напомнить</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    const id = editingTaskIdRef.current ?? editingTaskId;
+                    if (!id) return;
+                    setTaskReminder(id, null);
+                    setReminderPickerOpen(false);
+                    setEditingTaskId(null);
+                  }}
+                  style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}
+                  android_ripple={{ color: 'rgba(0,0,0,0.1)' }}>
+                  <Text style={{ color: colors.text }}>Убрать</Text>
+                </Pressable>
               </View>
 
               {/* Custom reminder picker */}
@@ -870,7 +1176,7 @@ export default function DeloScreen() {
                         if (ts > Date.now()) setTaskReminder(editingTaskId!, ts);
                       }}
                       style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
-                      <Text style={{ color: '#fff' }}>Поставить</Text>
+                      <Text style={{ color: '#fff' }}>Напомнить</Text>
                     </Pressable>
                     <Pressable onPress={() => setReminderPickerOpen(false)} style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
                       <Text style={{ color: colors.text }}>Отмена</Text>
@@ -904,99 +1210,96 @@ export default function DeloScreen() {
                 </View>
               )}
 
-              <View style={styles.row}>
-                <Pressable
-                  onPress={() => {
-                    updateTask(editingTaskId!, editDraft);
-                    setEditingTaskId(null);
-                  }}
-                  style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
-                  <Text style={{ color: '#fff' }}>Сохранить</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    setEditingTaskId(null);
-                  }}
-                  style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                  <Text style={{ color: colors.text }}>Отмена</Text>
-                </Pressable>
-              </View>
+              </ScrollView>
             </View>
           </View>
         </Modal>
 
-        {/* Delete confirm */}
+        {/* Delete confirm — по центру экрана */}
         <Modal visible={!!confirmDeleteTaskId} animationType="fade" transparent onRequestClose={() => setConfirmDeleteTaskId(null)}>
-          <View style={styles.modalOverlay}>
+          <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
             <View style={[styles.confirmBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' }}>Удалить дело?</Text>
-              <Text style={{ color: colors.muted, marginTop: 8 }}>
-                Подтвердите удаление. Можно отключить подтверждение на 3 дня.
-              </Text>
-              <Pressable onPress={() => setDontAskDeleteAgain((v) => !v)} style={{ marginTop: 12 }}>
-                <Text style={{ color: colors.text }}>{dontAskDeleteAgain ? '☑' : '☐'} Не спрашивать 3 дня</Text>
-              </Pressable>
+              <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' }}>Задачу нельзя будет восстановить.</Text>
+              <Text style={{ color: colors.text, fontSize: 16, marginTop: 8 }}>Удалить?</Text>
               <View style={[styles.row, { marginTop: 14 }]}>
-                <Pressable onPress={() => setConfirmDeleteTaskId(null)} style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                  <Text style={{ color: colors.text }}>Отмена</Text>
-                </Pressable>
-                <Pressable onPress={confirmDelete} style={[styles.primaryBtn, { backgroundColor: colors.overdue }]}>
+                <Pressable onPress={confirmDelete} style={[styles.primaryBtn, { backgroundColor: colors.overdue, flex: 1 }]}>
                   <Text style={{ color: '#fff' }}>Удалить</Text>
                 </Pressable>
+                <Pressable onPress={() => setConfirmDeleteTaskId(null)} style={[styles.primaryBtn, { backgroundColor: colors.surface2, flex: 1 }]}>
+                  <Text style={{ color: colors.text }}>Отмена</Text>
+                </Pressable>
               </View>
+              <Pressable onPress={() => setDontAskDeleteAgain((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 14, gap: 8 }}>
+                <Text style={{ color: colors.text }}>{dontAskDeleteAgain ? '☑' : '☐'}</Text>
+                <Text style={{ color: colors.text }}>Больше не спрашивать (3 дня)</Text>
+              </Pressable>
             </View>
           </View>
         </Modal>
 
-        {/* Postpone warning (if reminder today not fired) */}
+        {/* Перенос на завтра: кнопка «Завтра» + варианты с напоминанием */}
         <Modal visible={!!postponeModalTaskId} animationType="fade" transparent onRequestClose={() => setPostponeModalTaskId(null)}>
           <View style={styles.modalOverlay}>
             <View style={[styles.confirmBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' }}>У дела есть напоминание сегодня</Text>
-              <Text style={{ color: colors.muted, marginTop: 8 }}>
-                Если перенести дело на завтра, что сделать с напоминанием?
+              <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' }}>
+                {postponeTask?.reminderAt ? 'У дела есть напоминание сегодня' : 'Перенести на завтра?'}
               </Text>
-              <View style={[styles.row, { marginTop: 14 }]}>
-                <Pressable
-                  onPress={() => {
-                    if (postponeTask) postponeToTomorrow(postponeTask.id);
-                    setPostponeModalTaskId(null);
-                  }}
-                  style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                  <Text style={{ color: colors.text }}>Только дело</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    if (postponeTask) {
-                      postponeToTomorrow(postponeTask.id);
-                      const ts = postponeTask.reminderAt;
-                      if (ts) {
-                        const d = new Date(ts);
-                        d.setDate(d.getDate() + 1);
-                        setTaskReminder(postponeTask.id, d.getTime());
+              <Text style={{ color: colors.muted, marginTop: 8 }}>
+                {postponeTask?.reminderAt
+                  ? 'Если перенести дело на завтра, что сделать с напоминанием?'
+                  : 'Дело будет перенесено на завтра.'}
+              </Text>
+              <Pressable
+                onPress={() => {
+                  if (postponeTask) {
+                    postponeToTomorrow(postponeTask.id);
+                    const ts = postponeTask.reminderAt;
+                    if (ts) {
+                      const d = new Date(ts);
+                      d.setDate(d.getDate() + 1);
+                      setTaskReminder(postponeTask.id, d.getTime());
+                    }
+                  }
+                  setPostponeModalTaskId(null);
+                }}
+                style={[styles.primaryBtn, { backgroundColor: colors.accent, marginTop: 14 }]}>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>Завтра</Text>
+              </Pressable>
+              {postponeTask?.reminderAt ? (
+                <View style={[styles.row, { marginTop: 10 }]}>
+                  <Pressable
+                    onPress={() => {
+                      if (postponeTask) postponeToTomorrow(postponeTask.id);
+                      setPostponeModalTaskId(null);
+                    }}
+                    style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
+                    <Text style={{ color: colors.text }}>Только дело</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => {
+                      if (postponeTask) {
+                        setEditingTaskId(postponeTask.id);
+                        setReminderPickerOpen(true);
+                        setReminderAndroidMode('date');
                       }
-                    }
-                    setPostponeModalTaskId(null);
-                  }}
-                  style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                  <Text style={{ color: colors.text }}>С напоминанием</Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    if (postponeTask) {
-                      setEditingTaskId(postponeTask.id);
-                      setReminderPickerOpen(true);
-                      setReminderAndroidMode('date');
-                    }
-                    setPostponeModalTaskId(null);
-                  }}
-                  style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
-                  <Text style={{ color: '#fff' }}>Изменить</Text>
-                </Pressable>
-              </View>
+                      setPostponeModalTaskId(null);
+                    }}
+                    style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
+                    <Text style={{ color: colors.text }}>Изменить</Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           </View>
         </Modal>
+
+        {thankYouVisible && (
+          <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]} pointerEvents="none">
+            <View style={{ backgroundColor: colors.accent, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 999 }}>
+              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Отлично!</Text>
+            </View>
+          </View>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1004,23 +1307,27 @@ export default function DeloScreen() {
 
 const LIGHT = {
   bg: '#ffffff',
-  surface: '#f4f6f8',
-  surface2: '#e9eef3',
+  surface: '#e8ecf1',
+  surface2: '#d8dfe8',
+  tabActive: '#dcfce7',
   text: '#111827',
   muted: '#6b7280',
-  border: '#e5e7eb',
+  border: '#d1d9e2',
   accent: '#22c55e',
+  link: '#2563eb',
   overdue: '#ef4444',
 };
 
 const DARK = {
   bg: '#0b0f14',
-  surface: '#121822',
-  surface2: '#1b2635',
+  surface: '#1c2733',
+  surface2: '#283548',
+  tabActive: '#1e3a2f',
   text: '#e5e7eb',
   muted: '#9ca3af',
-  border: '#243244',
+  border: '#334155',
   accent: '#4caf50',
+  link: '#60a5fa',
   overdue: '#ef4444',
 };
 
@@ -1033,8 +1340,8 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   title: { fontSize: 28, fontWeight: '800' },
   subtitle: { marginTop: 2, fontSize: 13 },
-  tabs: { flexDirection: 'row', borderRadius: 12, overflow: 'hidden' },
-  tab: { paddingHorizontal: 12, paddingVertical: 8 },
+  tabs: { flexDirection: 'row', borderRadius: 12, overflow: 'hidden', alignSelf: 'flex-start' },
+  tab: { minWidth: 68, paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
   iconBtn: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   progressRow: { marginTop: 10, gap: 6 },
   progressTrack: { height: 8, borderRadius: 999 },
@@ -1053,6 +1360,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
   },
+  taskArrows: { alignItems: 'center', justifyContent: 'center', gap: 0, marginTop: 2 },
   taskRowCompact: { paddingVertical: 10 },
   taskRowExpanded: { paddingVertical: 16 },
   check: { width: 26, height: 26, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
@@ -1071,6 +1379,15 @@ const styles = StyleSheet.create({
   addBtn: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   modalSheet: { maxHeight: '88%', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 16 },
+  calendarSheet: { paddingHorizontal: 20, paddingVertical: 16 },
+  calendarListWrap: { flex: 1, alignItems: 'center', width: '100%', minHeight: 320 },
+  calendarListOuter: {
+    width: Math.floor(Dimensions.get('window').width) - 48,
+    maxWidth: '100%',
+    height: Math.max(320, Dimensions.get('window').height * 0.45),
+  },
+  calendarListInner: { marginHorizontal: 0, maxWidth: '100%' },
+  calendarLegend: { paddingTop: 8, paddingBottom: 8, gap: 6 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   modalTitle: { fontSize: 18, fontWeight: '800' },
   sectionTitle: { marginTop: 12, marginBottom: 8, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },

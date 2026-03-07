@@ -11,9 +11,10 @@ const DEFAULT_DAILY = [
 
 const SKIP_DELETE_CONFIRM_DAYS = 3;
 
-const DEFAULT_SETTINGS: Settings = {
+export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
   listMode: 'compact',
+  headerTabsStyle: 'full',
   skipDeleteConfirmUntil: null,
   dailyNotifications: DEFAULT_DAILY,
 };

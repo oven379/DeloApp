@@ -21,10 +21,13 @@ export type DailyNotificationSlot = {
 
 export type ThemeSetting = 'dark' | 'light' | 'system';
 export type ListMode = 'compact' | 'expanded';
+/** Полные подписи «Сегодня»/«Завтра» или краткие дни недели «пн»/«вт» */
+export type HeaderTabsStyle = 'full' | 'short';
 
 export type Settings = {
   theme: ThemeSetting;
   listMode: ListMode;
+  headerTabsStyle: HeaderTabsStyle;
   skipDeleteConfirmUntil: number | null;
   dailyNotifications: DailyNotificationSlot[];
 };
