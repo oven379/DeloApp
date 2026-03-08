@@ -2,6 +2,27 @@
 
 Приложение для того, чтобы выгрузить дела из головы и не забывать. Если задача не выполнена до 23:59 — она переносится на завтра и подсвечивается красным.
 
+---
+
+## Мобильное приложение (App Store / Play Market) — React Native Expo
+
+**Приложение для публикации в магазинах — это React Native Expo**, не Vite и не Capacitor. Оно находится в папке **`mobile-expo/`**.
+
+- **Технологии:** Expo SDK 54, React Native, expo-router, TypeScript.
+- **Запуск:** команды нужно выполнять **из папки `mobile-expo`** (в корне DeloApp нет Expo — там Vite/Capacitor, поэтому `npx expo start` в корне выдаст ошибку «expo is not installed»).
+  ```bash
+  cd mobile-expo
+  npm install
+  npx expo start
+  ```
+  Для Android: в другом терминале из `mobile-expo` выполните `npm run android`, либо сначала Metro (`npx expo start`), затем Run в Android Studio.
+  **Из корня** можно вызвать: `npm run mobile:start` или `npm run mobile:android` (скрипты переходят в `mobile-expo` и запускают Expo).
+- **Подробная инструкция:** см. **[mobile-expo/README.md](mobile-expo/README.md)**.
+
+В **корне** репозитория (эта папка) находится **веб-вариант** приложения (React + Vite + Capacitor) — это отдельный проект для браузера и упаковки веба в Capacitor. Для нативного мобильного приложения всегда используйте **`mobile-expo/`**.
+
+---
+
 ## MVP (текущая версия)
 
 - **Без регистрации** — все данные в локальном хранилище браузера (localStorage).

@@ -5,6 +5,9 @@
   "type": "module",
   "description": "Дело — выгрузи дела из головы",
   "scripts": {
+    "mobile:start": "cd mobile-expo && npx expo start",
+    "mobile:android": "cd mobile-expo && npm run android",
+    "mobile:ios": "cd mobile-expo && npx expo run:ios",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",

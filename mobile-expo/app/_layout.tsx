@@ -1,12 +1,15 @@
+import * as SplashScreen from 'expo-splash-screen';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+
+SplashScreen.preventAutoHideAsync?.();
 
 type ErrorBoundaryState = { hasError: boolean; error?: Error };
 
@@ -34,6 +37,10 @@ class RootErrorBoundary extends React.Component<{ children: React.ReactNode }, E
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
+  useEffect(() => {
+    SplashScreen.hideAsync?.().catch(() => {});
+  }, []);
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0b0f14' }}>
