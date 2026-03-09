@@ -186,10 +186,8 @@ export default function DeloScreen() {
         setTasks(rolled);
         setSettingsState(s0);
 
-        // Попросим разрешение и синхронизируем напоминания при первом запуске.
-        requestPermissions()
-          .then(() => Promise.all([syncTaskReminders(rolled), syncDailyNotifications(s0.dailyNotifications), syncOverdueReminder(rolled)]))
-          .catch(() => {});
+        // Только запрашиваем разрешения при первом запуске. Синхронизацию напоминаний делает один раз эффект ниже (debounce), чтобы не спамить при старте.
+        requestPermissions().catch(() => {});
 
         const response = await Notifications.getLastNotificationResponseAsync();
         if (!cancelled && response?.notification?.request?.content?.data) {
@@ -274,24 +272,29 @@ export default function DeloScreen() {
     };
   }, []);
 
-  // Дебаунс синхронизации напоминаний при изменениях задач.
-  const syncTasksRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!settings) return;
-    if (syncTasksRef.current) clearTimeout(syncTasksRef.current);
-    syncTasksRef.current = setTimeout(() => {
-      syncTaskReminders(tasks).catch(() => {});
-      syncOverdueReminder(tasks).catch(() => {});
-    }, 350);
-    return () => {
-      if (syncTasksRef.current) clearTimeout(syncTasksRef.current);
-    };
-  }, [tasks, settings]);
+  // Одна синхронизация напоминаний (задачи + ежедневные + просроченные) с дебаунсом, чтобы не спамить при старте и при частых изменениях.
+  const syncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSyncRef = useRef<number>(0);
+  const SYNC_DEBOUNCE_MS = 1200;
+  const SYNC_THROTTLE_MS = 4000;
 
   useEffect(() => {
     if (!settings) return;
-    syncDailyNotifications(settings.dailyNotifications).catch(() => {});
-  }, [settings?.dailyNotifications, settings]);
+    if (syncRef.current) clearTimeout(syncRef.current);
+    syncRef.current = setTimeout(() => {
+      const now = Date.now();
+      if (now - lastSyncRef.current < SYNC_THROTTLE_MS && lastSyncRef.current > 0) return;
+      lastSyncRef.current = now;
+      Promise.all([
+        syncTaskReminders(tasks),
+        syncOverdueReminder(tasks),
+        syncDailyNotifications(settings.dailyNotifications ?? []),
+      ]).catch(() => {});
+    }, SYNC_DEBOUNCE_MS);
+    return () => {
+      if (syncRef.current) clearTimeout(syncRef.current);
+    };
+  }, [tasks, settings]);
 
   const currentDayStr = getCurrentDayStr(dayView);
   const stats = dayView === 'today' ? getTodayStats(tasks) : getDayStats(tasks, currentDayStr);
@@ -872,7 +875,13 @@ export default function DeloScreen() {
                             </Text>
                           </View>
                         ))}
-                        <Pressable onPress={() => setReminderNotifications([])} style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
+                        <Pressable
+                          onPress={() => {
+                            setReminderNotifications([]);
+                            Notifications.setBadgeCountAsync(0).catch(() => {});
+                          }}
+                          style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}
+                        >
                           <Text style={{ color: colors.text }}>Очистить все</Text>
                         </Pressable>
                       </>

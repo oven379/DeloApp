@@ -257,7 +257,7 @@ Metro — это сервер, который отдаёт JavaScript прило
 ## Иконка приложения и логотип
 
 - **Иконка на рабочем столе (эмулятор/телефон):** берётся из **`app.json`** → `expo.icon` и `expo.android.adaptiveIcon`. Файлы лежат в **`assets/images/`**:
-  - `icon.png` — основная иконка (1024×1024 для Expo).
+  - `icon.png` — **основная иконка приложения; для магазинов (App Store / Play) нужен размер 1024×1024.** При необходимости измените размер в графическом редакторе и сохраните как `assets/images/icon.png`.
   - `android-icon-foreground.png`, `android-icon-background.png`, `android-icon-monochrome.png` — для Android (adaptive icon).
 
 Чтобы иконка отображалась после изменений или на новом эмуляторе:

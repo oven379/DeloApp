@@ -20,7 +20,7 @@ Notifications.setNotificationHandler({
     shouldShowBanner: true,
     shouldShowList: true,
     shouldPlaySound: true,
-    shouldSetBadge: false,
+    shouldSetBadge: true,
   }),
 });
 
@@ -45,9 +45,12 @@ export async function requestPermissions() {
 async function cancelByTag(tag: string) {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   const toCancel = scheduled
-    .filter((n) => (n.content?.data as any)?.tag === tag)
+    .filter((n) => {
+      const data = n.content?.data as Record<string, unknown> | undefined;
+      return data && String(data.tag) === tag;
+    })
     .map((n) => n.identifier);
-  await Promise.all(toCancel.map((id) => Notifications.cancelScheduledNotificationAsync(id)));
+  for (const id of toCancel) await Notifications.cancelScheduledNotificationAsync(id);
 }
 
 async function cancelTaskById(taskId: string) {
