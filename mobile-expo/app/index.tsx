@@ -122,6 +122,7 @@ export default function DeloScreen() {
   const [editDraft, setEditDraft] = useState('');
   const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
   const [reminderTemp, setReminderTemp] = useState<Date>(new Date());
+  const [showPastReminderWarning, setShowPastReminderWarning] = useState(false);
   const [reminderAndroidMode, setReminderAndroidMode] = useState<'date' | 'time'>('date');
   const [dailyTimePickerIdx, setDailyTimePickerIdx] = useState<number | null>(null);
   const [dailyTimeTemp, setDailyTimeTemp] = useState<Date>(new Date());
@@ -499,6 +500,11 @@ export default function DeloScreen() {
   const editingTask = tasks.find((t) => t.id === editingTaskId) || null;
   const postponeTask = tasks.find((t) => t.id === postponeModalTaskId) || null;
 
+  const setReminderTempByUser = (d: Date) => {
+    setReminderTemp(d);
+    setShowPastReminderWarning(d.getTime() <= Date.now());
+  };
+
   useEffect(() => {
     if (editingTaskId) {
       if (!editingTask) {
@@ -512,8 +518,10 @@ export default function DeloScreen() {
           ? new Date(editingTask.reminderAt)
           : new Date();
       setReminderTemp(base);
+      setShowPastReminderWarning(false);
     } else {
       setEditDraft('');
+      setShowPastReminderWarning(false);
     }
   }, [editingTaskId, editingTask, tasks.length]);
 
@@ -1124,7 +1132,7 @@ export default function DeloScreen() {
                               setReminderAndroidMode('date');
                               return;
                             }
-                            setReminderTemp(d);
+                            setReminderTempByUser(d);
                           }}
                           style={[styles.chip, { backgroundColor: dayMode === label ? colors.accent : colors.surface }]}>
                           <Text style={{ color: dayMode === label ? '#fff' : colors.text }}>{label}</Text>
@@ -1149,7 +1157,7 @@ export default function DeloScreen() {
                             }
                             const d = new Date(reminderTemp);
                             d.setHours(p.h!, p.m!, 0, 0);
-                            setReminderTemp(d);
+                            setReminderTempByUser(d);
                           }}
                           style={[styles.chip, { backgroundColor: timePreset === p.label ? colors.accent : colors.surface }]}>
                           <Text style={{ color: timePreset === p.label ? '#fff' : colors.text }}>{p.label}</Text>
@@ -1159,7 +1167,7 @@ export default function DeloScreen() {
                   </View>
                 );
               })()}
-              {reminderTemp.getTime() <= Date.now() && (
+              {showPastReminderWarning && reminderTemp.getTime() <= Date.now() && (
                 <View style={{ backgroundColor: colors.overdue, padding: 10, borderRadius: 10, marginTop: 12 }}>
                   <Text style={{ color: '#fff', fontSize: 13 }}>Прошедшую дату установить нельзя</Text>
                 </View>
@@ -1172,11 +1180,11 @@ export default function DeloScreen() {
                     const ts = reminderTemp.getTime();
                     setReminderPickerOpen(false);
                     const now = Date.now();
-                    if (ts > now) {
-                      setTaskReminder(id, ts);
-                    } else {
-                      setTaskReminder(id, now + 60000);
+                    if (ts <= now) {
+                      setShowPastReminderWarning(true);
+                      return;
                     }
+                    setTaskReminder(id, ts);
                     setEditingTaskId(null);
                   }}
                   style={[styles.primaryBtn, { backgroundColor: colors.accent }]}
@@ -1205,7 +1213,7 @@ export default function DeloScreen() {
                     mode="datetime"
                     display="spinner"
                     onChange={(_, date) => {
-                      if (date) setReminderTemp(date);
+                      if (date) setReminderTempByUser(date);
                     }}
                   />
                   <View style={[styles.row, { marginTop: 10 }]}>
@@ -1213,7 +1221,11 @@ export default function DeloScreen() {
                       onPress={() => {
                         const ts = reminderTemp.getTime();
                         setReminderPickerOpen(false);
-                        if (ts > Date.now()) setTaskReminder(editingTaskId!, ts);
+                        if (ts <= Date.now()) {
+                          setShowPastReminderWarning(true);
+                          return;
+                        }
+                        setTaskReminder(editingTaskId!, ts);
                       }}
                       style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
                       <Text style={{ color: '#fff' }}>Напомнить</Text>
@@ -1236,13 +1248,17 @@ export default function DeloScreen() {
                         setReminderPickerOpen(false);
                         return;
                       }
-                      if (date) setReminderTemp(date);
+                      if (date) setReminderTempByUser(date);
                       if (reminderAndroidMode === 'date') {
                         setReminderAndroidMode('time');
                       } else {
                         const ts = (date ?? reminderTemp).getTime();
                         setReminderPickerOpen(false);
-                        if (ts > Date.now()) setTaskReminder(editingTaskId!, ts);
+                        if (ts <= Date.now()) {
+                          setShowPastReminderWarning(true);
+                        } else {
+                          setTaskReminder(editingTaskId!, ts);
+                        }
                         setReminderAndroidMode('date');
                       }
                     }}
