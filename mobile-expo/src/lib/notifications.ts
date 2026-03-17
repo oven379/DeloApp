@@ -11,9 +11,7 @@ const TAG_DAILY_EVENING = 'daily_evening';
 const TAG_OVERDUE = 'overdue_2121';
 const TAG_TASK = 'task_reminder';
 
-const OVERDUE_REMINDER_HOUR = 21;
-const OVERDUE_REMINDER_MINUTE = 21;
-const OVERDUE_REMINDER_MESSAGE = 'Есть не законченные дела! Сделай что-то с этим, пожалуйста)';
+// Overdue reminders were removed: keep TAG_OVERDUE only to cancel old scheduled notifications.
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -78,7 +76,8 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
           data: { tag: TAG_DAILY_MORNING },
           sound: Platform.OS === 'android' ? undefined : undefined,
         },
-        trigger: { hour: list[0].hour ?? 9, minute: list[0].minute ?? 0, repeats: true, channelId: CHANNEL_ID } as any,
+        // Only 09:00
+        trigger: { hour: 9, minute: 0, repeats: true, channelId: CHANNEL_ID } as any,
       })
     );
   }
@@ -90,7 +89,8 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
           body: list[1].text || 'Проверь свои дела на завтра.',
           data: { tag: TAG_DAILY_EVENING },
         },
-        trigger: { hour: list[1].hour ?? 21, minute: list[1].minute ?? 0, repeats: true, channelId: CHANNEL_ID } as any,
+        // Only 21:00
+        trigger: { hour: 21, minute: 0, repeats: true, channelId: CHANNEL_ID } as any,
       })
     );
   }
@@ -123,31 +123,8 @@ export async function syncTaskReminders(tasks: Task[]) {
   );
 }
 
-export async function syncOverdueReminder(tasks: Task[]) {
+export async function disableOverdueReminders() {
   await ensureAndroidChannel();
   await cancelByTag(TAG_OVERDUE);
-  const hasOverdue = (tasks || []).some((t) => !t.completedAt && t.isOverdue);
-  if (!hasOverdue) return;
-
-  const now = new Date();
-  let scheduled = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate(),
-    OVERDUE_REMINDER_HOUR,
-    OVERDUE_REMINDER_MINUTE,
-    0,
-    0
-  );
-  if (scheduled.getTime() <= now.getTime()) scheduled.setDate(scheduled.getDate() + 1);
-
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: APP_TITLE,
-      body: OVERDUE_REMINDER_MESSAGE,
-      data: { tag: TAG_OVERDUE },
-    },
-    trigger: { date: scheduled, channelId: CHANNEL_ID } as any,
-  });
 }
 

@@ -24,7 +24,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { DayStr, Settings, Task } from '../src/types';
 import { DEFAULT_SETTINGS, getSettings, getSkipDeleteConfirmUntil, getTasks, saveSettings, saveTasks } from '../src/lib/storage';
 import { createTask, getCurrentDayStr, getDayStats, getTodayStats, rolloverTasks, todayStr, tomorrowStr } from '../src/lib/tasks';
-import { requestPermissions, syncDailyNotifications, syncOverdueReminder, syncTaskReminders } from '../src/lib/notifications';
+import { disableOverdueReminders, requestPermissions, syncDailyNotifications, syncTaskReminders } from '../src/lib/notifications';
 
 const WEEKDAY_SHORT = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
 
@@ -186,8 +186,11 @@ export default function DeloScreen() {
         setTasks(rolled);
         setSettingsState(s0);
 
-        // Только запрашиваем разрешения при первом запуске. Синхронизацию напоминаний делает один раз эффект ниже (debounce), чтобы не спамить при старте.
-        requestPermissions().catch(() => {});
+        // Только запрашиваем разрешения при первом запуске. Синхронизацию напоминаний делает эффект ниже.
+        // Также отключаем устаревшие "просроченные" уведомления (если были запланированы в прошлых версиях).
+        requestPermissions()
+          .then(() => disableOverdueReminders())
+          .catch(() => {});
 
         const response = await Notifications.getLastNotificationResponseAsync();
         if (!cancelled && response?.notification?.request?.content?.data) {
@@ -272,29 +275,57 @@ export default function DeloScreen() {
     };
   }, []);
 
-  // Одна синхронизация напоминаний (задачи + ежедневные + просроченные) с дебаунсом, чтобы не спамить при старте и при частых изменениях.
-  const syncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSyncRef = useRef<number>(0);
-  const SYNC_DEBOUNCE_MS = 1200;
-  const SYNC_THROTTLE_MS = 4000;
+  // Синхронизацию уведомлений делаем только когда реально меняются напоминания/задачи,
+  // а не при любом изменении настроек (например, переключение темы/вида списка).
+  const tasksSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dailySyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const taskRemindersKey = useMemo(() => {
+    // Достаточно id/reminderAt — тема/вид списка сюда не входят.
+    return (tasks || []).map((t) => `${t.id}:${t.reminderAt ?? 0}`).join('|');
+  }, [tasks]);
+
+  const dailyNotificationsKey = useMemo(() => {
+    const list = settings?.dailyNotifications ?? [];
+    return list.map((s) => `${s.enabled ? 1 : 0}:${s.hour ?? 0}:${s.minute ?? 0}:${s.text ?? ''}`).join('|');
+  }, [settings?.dailyNotifications]);
+
+  const settingsReady = !!settings;
+
+  const tasksRef = useRef<Task[]>([]);
+  const dailySlotsRef = useRef<Settings['dailyNotifications']>([]);
 
   useEffect(() => {
-    if (!settings) return;
-    if (syncRef.current) clearTimeout(syncRef.current);
-    syncRef.current = setTimeout(() => {
-      const now = Date.now();
-      if (now - lastSyncRef.current < SYNC_THROTTLE_MS && lastSyncRef.current > 0) return;
-      lastSyncRef.current = now;
-      Promise.all([
-        syncTaskReminders(tasks),
-        syncOverdueReminder(tasks),
-        syncDailyNotifications(settings.dailyNotifications ?? []),
-      ]).catch(() => {});
-    }, SYNC_DEBOUNCE_MS);
+    tasksRef.current = tasks;
+  }, [tasks]);
+
+  useEffect(() => {
+    dailySlotsRef.current = settings?.dailyNotifications ?? [];
+  }, [settings?.dailyNotifications]);
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    if (tasksSyncRef.current) clearTimeout(tasksSyncRef.current);
+    tasksSyncRef.current = setTimeout(() => {
+      // Only task reminders + ensure overdue reminders are disabled.
+      Promise.all([syncTaskReminders(tasksRef.current), disableOverdueReminders()]).catch(() => {});
+    }, 800);
     return () => {
-      if (syncRef.current) clearTimeout(syncRef.current);
+      if (tasksSyncRef.current) clearTimeout(tasksSyncRef.current);
     };
-  }, [tasks, settings]);
+  }, [taskRemindersKey, settingsReady]);
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    if (dailySyncRef.current) clearTimeout(dailySyncRef.current);
+    dailySyncRef.current = setTimeout(() => {
+      // Daily notifications are fixed to 09:00 and 21:00 inside syncDailyNotifications.
+      syncDailyNotifications(dailySlotsRef.current).catch(() => {});
+    }, 800);
+    return () => {
+      if (dailySyncRef.current) clearTimeout(dailySyncRef.current);
+    };
+  }, [dailyNotificationsKey, settingsReady]);
 
   const currentDayStr = getCurrentDayStr(dayView);
   const stats = dayView === 'today' ? getTodayStats(tasks) : getDayStats(tasks, currentDayStr);
