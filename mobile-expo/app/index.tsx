@@ -15,7 +15,7 @@ import {
   useColorScheme,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import { CalendarList } from 'react-native-calendars';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -112,6 +112,7 @@ function parseLinksAndPhones(text: string): TextSegment[] {
 }
 
 export default function DeloScreen() {
+  const insets = useSafeAreaInsets();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [settings, setSettingsState] = useState<Settings | null>(null);
   const [dayView, setDayView] = useState<DayView>('today');
@@ -332,6 +333,9 @@ export default function DeloScreen() {
   const currentDayStr = getCurrentDayStr(dayView);
   const stats = dayView === 'today' ? getTodayStats(tasks) : getDayStats(tasks, currentDayStr);
   const headerDateLabel = formatHeaderDate(dayView);
+
+  // Footer is fixed to bottom; keep list content above it.
+  const footerPad = 64 + insets.bottom;
 
   const markedDates = useMemo(() => {
     const marks: Record<string, { marked: boolean; dots: { key: string; color: string }[] }> = {};
@@ -713,7 +717,7 @@ export default function DeloScreen() {
           </View>
         </View>
 
-        <View style={styles.body}>
+        <View style={[styles.body, { paddingBottom: footerPad }]}>
           <View style={[styles.searchWrap, { backgroundColor: colors.bg }]}>
             <TextInput
               value={searchQuery}
@@ -807,7 +811,7 @@ export default function DeloScreen() {
           )}
         </View>
 
-        <View style={[styles.footer, { borderTopColor: colors.border, backgroundColor: colors.bg }]}>
+        <View style={[styles.footer, { borderTopColor: colors.border, backgroundColor: colors.bg, paddingBottom: 10 + insets.bottom }]}>
           <TextInput
             ref={addInputRef}
             value={newTaskText}
@@ -1460,7 +1464,17 @@ const styles = StyleSheet.create({
   primaryBtn: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14, alignItems: 'center' },
   doneWrap: { paddingTop: 10, paddingBottom: 12 },
   doneTitle: { marginLeft: 16, marginTop: 8, marginBottom: 4, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
-  footer: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1 },
+  footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    borderTopWidth: 1,
+  },
   addInput: { flex: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
   addBtn: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
