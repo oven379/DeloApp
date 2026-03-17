@@ -20,6 +20,7 @@ import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flat
 import { CalendarList } from 'react-native-calendars';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
+import { Swipeable } from 'react-native-gesture-handler';
 
 import type { DayStr, Settings, Task } from '../src/types';
 import { DEFAULT_SETTINGS, getSettings, getSkipDeleteConfirmUntil, getTasks, saveSettings, saveTasks } from '../src/lib/storage';
@@ -407,6 +408,118 @@ export default function DeloScreen() {
     }
   };
 
+  const TaskRow = ({ item, drag, isActive }: RenderItemParams<Task>) => {
+    const swipeRef = useRef<Swipeable>(null);
+    return (
+      <Swipeable
+        ref={swipeRef}
+        overshootRight={false}
+        rightThreshold={48}
+        renderRightActions={() => (
+          <View
+            style={{
+              justifyContent: 'center',
+              alignItems: 'flex-end',
+              backgroundColor: '#22c55e',
+              borderRadius: 14,
+              marginVertical: 6,
+              paddingHorizontal: 18,
+            }}>
+            <Text style={{ color: '#fff', fontWeight: '700' }}>Готово ✓</Text>
+          </View>
+        )}
+        onSwipeableOpen={() => {
+          swipeRef.current?.close();
+          toggleTask(item.id);
+        }}>
+        <Pressable
+          onLongPress={drag}
+          onPress={() => setEditingTaskId(item.id)}
+          style={[
+            styles.taskRow,
+            settings.listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
+            {
+              backgroundColor: colors.surface,
+              borderColor: item.isOverdue && !item.completedAt ? colors.overdue : colors.border,
+              opacity: isActive ? 0.7 : 1,
+            },
+          ]}>
+          <View style={styles.taskArrows}>
+            <Text style={{ color: colors.accent, fontSize: 12 }}>▲</Text>
+            <Text style={{ color: colors.overdue, fontSize: 12 }}>▼</Text>
+          </View>
+          <Pressable onPress={() => toggleTask(item.id)} style={[styles.check, { borderColor: colors.border }]}>
+            <Text style={{ color: colors.text }}>{item.completedAt ? '✓' : ''}</Text>
+          </Pressable>
+          <View style={styles.taskTextCol}>
+            <Text style={[styles.taskText, { color: colors.text }]} numberOfLines={3}>
+              {parseLinksAndPhones(item.text).map((seg, i) =>
+                seg.type === 'text' ? (
+                  <Text key={i} style={{ color: colors.text }}>
+                    {seg.value}
+                  </Text>
+                ) : seg.type === 'link' ? (
+                  <Text
+                    key={i}
+                    style={{ color: colors.link, textDecorationLine: 'underline' }}
+                    onPress={() => {
+                      const url = seg.url.startsWith('http') ? seg.url : `https://${seg.url}`;
+                      Linking.openURL(url).catch(() => {});
+                    }}>
+                    {seg.label}
+                  </Text>
+                ) : seg.type === 'url' ? (
+                  <Text
+                    key={i}
+                    style={{ color: colors.link, textDecorationLine: 'underline' }}
+                    onPress={() => {
+                      const url = seg.value.startsWith('http') ? seg.value : `https://${seg.value}`;
+                      Linking.openURL(url).catch(() => {});
+                    }}>
+                    {seg.value}
+                  </Text>
+                ) : (
+                  <Text
+                    key={i}
+                    style={{ color: colors.link, textDecorationLine: 'underline' }}
+                    onPress={() => Linking.openURL(`tel:${seg.value.replace(/\D/g, '')}`).catch(() => {})}>
+                    {seg.value}
+                  </Text>
+                )
+              )}
+            </Text>
+            <Text
+              style={[
+                styles.taskMeta,
+                { color: item.reminderAt && item.reminderAt > Date.now() ? colors.accent : colors.muted },
+              ]}>
+              {item.reminderAt && item.reminderAt > Date.now() ? formatReminderLabel(item.reminderAt) : formatTaskDateTime(item.createdAt)}
+            </Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Pressable
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                setEditingTaskId(item.id);
+              }}
+              style={styles.smallBtn}
+              hitSlop={8}>
+              <Text style={{ color: item.reminderAt && item.reminderAt > Date.now() ? colors.accent : colors.muted, fontSize: 14 }}>🕐</Text>
+            </Pressable>
+            {dayView === 'today' && currentDayStr === todayStr() && (
+              <Pressable onPress={() => handlePostponePress(item)} style={[styles.smallBtn, { backgroundColor: colors.surface2 }]}>
+                <Text style={{ color: colors.text, fontSize: 12 }}>Завтра</Text>
+              </Pressable>
+            )}
+            <Pressable onPress={() => deleteTask(item.id)} style={styles.smallBtn}>
+              <Text style={{ color: colors.muted }}>🗑️</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Swipeable>
+    );
+  };
+
   const updateTask = (id: string, text: string) => {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, text: text.trim(), isOverdue: false } : t)));
   };
@@ -615,90 +728,7 @@ export default function DeloScreen() {
             data={incomplete}
             keyExtractor={(item) => item.id}
             onDragEnd={(p) => reorderTasks(p, currentDayStr)}
-            renderItem={({ item, drag, isActive }: RenderItemParams<Task>) => (
-              <Pressable
-                onLongPress={drag}
-                onPress={() => setEditingTaskId(item.id)}
-                style={[
-                  styles.taskRow,
-                  settings.listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
-                  {
-                    backgroundColor: colors.surface,
-                    borderColor: item.isOverdue && !item.completedAt ? colors.overdue : colors.border,
-                    opacity: isActive ? 0.7 : 1,
-                  },
-                ]}>
-                <View style={styles.taskArrows}>
-                  <Text style={{ color: colors.accent, fontSize: 12 }}>▲</Text>
-                  <Text style={{ color: colors.overdue, fontSize: 12 }}>▼</Text>
-                </View>
-                <Pressable onPress={() => toggleTask(item.id)} style={[styles.check, { borderColor: colors.border }]}>
-                  <Text style={{ color: colors.text }}>{item.completedAt ? '✓' : ''}</Text>
-                </Pressable>
-                <View style={styles.taskTextCol}>
-                  <Text style={[styles.taskText, { color: colors.text }]} numberOfLines={3}>
-                    {parseLinksAndPhones(item.text).map((seg, i) =>
-                      seg.type === 'text' ? (
-                        <Text key={i} style={{ color: colors.text }}>{seg.value}</Text>
-                      ) : seg.type === 'link' ? (
-                        <Text
-                          key={i}
-                          style={{ color: colors.link, textDecorationLine: 'underline' }}
-                          onPress={() => {
-                            const url = seg.url.startsWith('http') ? seg.url : `https://${seg.url}`;
-                            Linking.openURL(url).catch(() => {});
-                          }}>
-                          {seg.label}
-                        </Text>
-                      ) : seg.type === 'url' ? (
-                        <Text
-                          key={i}
-                          style={{ color: colors.link, textDecorationLine: 'underline' }}
-                          onPress={() => {
-                            const url = seg.value.startsWith('http') ? seg.value : `https://${seg.value}`;
-                            Linking.openURL(url).catch(() => {});
-                          }}>
-                          {seg.value}
-                        </Text>
-                      ) : (
-                        <Text
-                          key={i}
-                          style={{ color: colors.link, textDecorationLine: 'underline' }}
-                          onPress={() => Linking.openURL(`tel:${seg.value.replace(/\D/g, '')}`).catch(() => {})}>
-                          {seg.value}
-                        </Text>
-                      )
-                    )}
-                  </Text>
-                  <Text style={[styles.taskMeta, { color: (item.reminderAt && item.reminderAt > Date.now()) ? colors.accent : colors.muted }]}>
-                    {(item.reminderAt && item.reminderAt > Date.now())
-                      ? formatReminderLabel(item.reminderAt)
-                      : formatTaskDateTime(item.createdAt)}
-                  </Text>
-                </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Pressable
-                    onPress={(e) => {
-                      e?.stopPropagation?.();
-                      setEditingTaskId(item.id);
-                    }}
-                    style={styles.smallBtn}
-                    hitSlop={8}>
-                    <Text style={{ color: item.reminderAt && item.reminderAt > Date.now() ? colors.accent : colors.muted, fontSize: 14 }}>🕐</Text>
-                  </Pressable>
-                  {dayView === 'today' && currentDayStr === todayStr() && (
-                    <Pressable
-                      onPress={() => handlePostponePress(item)}
-                      style={[styles.smallBtn, { backgroundColor: colors.surface2 }]}>
-                      <Text style={{ color: colors.text, fontSize: 12 }}>Завтра</Text>
-                    </Pressable>
-                  )}
-                  <Pressable onPress={() => deleteTask(item.id)} style={styles.smallBtn}>
-                    <Text style={{ color: colors.muted }}>🗑️</Text>
-                  </Pressable>
-                </View>
-              </Pressable>
-            )}
+            renderItem={(p: RenderItemParams<Task>) => <TaskRow {...p} />}
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Text style={[styles.emptyTitle, { color: colors.text }]}>
