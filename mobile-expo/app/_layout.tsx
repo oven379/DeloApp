@@ -1,3 +1,4 @@
+import './_init';
 import * as SplashScreen from 'expo-splash-screen';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -5,7 +6,6 @@ import React, { useEffect } from 'react';
 import { Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
