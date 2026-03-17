@@ -130,7 +130,7 @@ export default function DeloScreen() {
   const [dailyTimeTemp, setDailyTimeTemp] = useState<Date>(new Date());
   const [postponeModalTaskId, setPostponeModalTaskId] = useState<string | null>(null);
   const [reminderNotifications, setReminderNotifications] = useState<
-    { id: string; taskId: string | null; text: string; firedAt: number }[]
+    { id: string; requestId: string; taskId: string | null; text: string; firedAt: number }[]
   >([]);
   const [confirmDeleteTaskId, setConfirmDeleteTaskId] = useState<string | null>(null);
   const [dontAskDeleteAgain, setDontAskDeleteAgain] = useState(false);
@@ -178,6 +178,30 @@ export default function DeloScreen() {
     return `Напоминание ${day} ${month} в ${timeStr}`;
   }
 
+  const handleNotificationOpen = (response: Notifications.NotificationResponse | null | undefined) => {
+    if (!response) return;
+    const requestId = response.notification.request.identifier;
+    const data = response.notification.request.content.data as { taskId?: string } | undefined;
+
+    if (requestId) {
+      setReminderNotifications((prev) => prev.filter((n) => n.requestId !== requestId));
+      Notifications.dismissNotificationAsync(requestId).catch(() => {});
+    }
+    (Notifications as any).clearLastNotificationResponseAsync?.().catch(() => {});
+
+    setSettingsOpen(false);
+    setCalendarOpen(false);
+    setSearchQuery('');
+
+    if (data?.taskId) {
+      setEditingTaskId(data.taskId);
+    } else {
+      // For non-task notifications: open main tasks view.
+      setEditingTaskId(null);
+      setDayView('today');
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -196,10 +220,7 @@ export default function DeloScreen() {
           .catch(() => {});
 
         const response = await Notifications.getLastNotificationResponseAsync();
-        if (!cancelled && response?.notification?.request?.content?.data) {
-          const data = response.notification.request.content.data as { taskId?: string };
-          if (data.taskId && rolled.some((t) => t.id === data.taskId)) setEditingTaskId(data.taskId);
-        }
+        if (!cancelled) handleNotificationOpen(response);
       } catch {
         if (!cancelled) {
           setTasks([]);
@@ -237,12 +258,9 @@ export default function DeloScreen() {
         }
         return prev;
       });
-      // Если приложение открыли тапом по уведомлению о деле — открыть карточку дела (на случай, если response listener ещё не сработал).
+      // If app became active after tapping a notification, open task/main view accordingly.
       Notifications.getLastNotificationResponseAsync()
-        .then((response) => {
-          const data = response?.notification?.request?.content?.data as { taskId?: string } | undefined;
-          if (data?.taskId) setEditingTaskId(data.taskId);
-        })
+        .then((response) => handleNotificationOpen(response))
         .catch(() => {});
     });
     return () => sub.remove();
@@ -253,24 +271,19 @@ export default function DeloScreen() {
     const sub1 = Notifications.addNotificationReceivedListener((n) => {
       const now = Date.now();
       const text = n.request.content.body || 'Напоминание';
+      const requestId = n.request.identifier;
       const taskId = (n.request.content.data as any)?.taskId ?? null;
-      setReminderNotifications((prev) => [
-        ...prev,
-        { id: `rem_${taskId ?? 'x'}_${now}_${prev.length}`, taskId, text, firedAt: now },
-      ]);
+      setReminderNotifications((prev) =>
+        prev.some((x) => x.requestId === requestId)
+          ? prev
+          : [...prev, { id: `rem_${requestId}_${now}`, requestId, taskId, text, firedAt: now }]
+      );
       Notifications.getBadgeCountAsync()
         .then((c) => Notifications.setBadgeCountAsync((c ?? 0) + 1))
         .catch(() => {});
     });
     const sub2 = Notifications.addNotificationResponseReceivedListener((r) => {
-      const now = Date.now();
-      const text = r.notification.request.content.body || 'Напоминание';
-      const taskId = (r.notification.request.content.data as any)?.taskId ?? null;
-      setReminderNotifications((prev) => [
-        ...prev,
-        { id: `rem_${taskId ?? 'x'}_${now}_${prev.length}`, taskId, text, firedAt: now },
-      ]);
-      if (taskId) setEditingTaskId(taskId);
+      handleNotificationOpen(r);
     });
     return () => {
       sub1.remove();
@@ -336,9 +349,13 @@ export default function DeloScreen() {
 
   // Footer is fixed to bottom; keep list content above it.
   const footerPad = 64 + insets.bottom;
+  const listMode = settings?.listMode ?? 'compact';
 
   const markedDates = useMemo(() => {
-    const marks: Record<string, { marked: boolean; dots: { key: string; color: string }[] }> = {};
+    const marks: Record<
+      string,
+      { marked: boolean; dots: { key: string; color: string }[]; selected?: boolean; selectedColor?: string }
+    > = {};
     const today0 = new Date();
     today0.setHours(0, 0, 0, 0);
     const todayTime = today0.getTime();
@@ -441,22 +458,24 @@ export default function DeloScreen() {
           onPress={() => setEditingTaskId(item.id)}
           style={[
             styles.taskRow,
-            settings.listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
+            listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
             {
               backgroundColor: colors.surface,
               borderColor: item.isOverdue && !item.completedAt ? colors.overdue : colors.border,
               opacity: isActive ? 0.7 : 1,
             },
           ]}>
-          <View style={styles.taskArrows}>
+          <View style={[styles.taskArrows, listMode === 'compact' ? styles.taskArrowsCompact : styles.taskArrowsExpanded]}>
             <Text style={{ color: colors.accent, fontSize: 12 }}>▲</Text>
             <Text style={{ color: colors.overdue, fontSize: 12 }}>▼</Text>
           </View>
-          <Pressable onPress={() => toggleTask(item.id)} style={[styles.check, { borderColor: colors.border }]}>
+          <Pressable
+            onPress={() => toggleTask(item.id)}
+            style={[styles.check, listMode === 'compact' ? styles.checkCompact : styles.checkExpanded, { borderColor: colors.border }]}>
             <Text style={{ color: colors.text }}>{item.completedAt ? '✓' : ''}</Text>
           </Pressable>
           <View style={styles.taskTextCol}>
-            <Text style={[styles.taskText, { color: colors.text }]} numberOfLines={3}>
+            <Text style={[styles.taskText, { color: colors.text }]} numberOfLines={listMode === 'compact' ? 2 : 5}>
               {parseLinksAndPhones(item.text).map((seg, i) =>
                 seg.type === 'text' ? (
                   <Text key={i} style={{ color: colors.text }}>
@@ -492,13 +511,15 @@ export default function DeloScreen() {
                 )
               )}
             </Text>
-            <Text
-              style={[
-                styles.taskMeta,
-                { color: item.reminderAt && item.reminderAt > Date.now() ? colors.accent : colors.muted },
-              ]}>
-              {item.reminderAt && item.reminderAt > Date.now() ? formatReminderLabel(item.reminderAt) : formatTaskDateTime(item.createdAt)}
-            </Text>
+            {listMode === 'expanded' && (
+              <Text
+                style={[
+                  styles.taskMeta,
+                  { color: item.reminderAt && item.reminderAt > Date.now() ? colors.accent : colors.muted },
+                ]}>
+                {item.reminderAt && item.reminderAt > Date.now() ? formatReminderLabel(item.reminderAt) : formatTaskDateTime(item.createdAt)}
+              </Text>
+            )}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <Pressable
@@ -513,6 +534,11 @@ export default function DeloScreen() {
             {dayView === 'today' && currentDayStr === todayStr() && (
               <Pressable onPress={() => handlePostponePress(item)} style={[styles.smallBtn, { backgroundColor: colors.surface2 }]}>
                 <Text style={{ color: colors.text, fontSize: 12 }}>Завтра</Text>
+              </Pressable>
+            )}
+            {(dayView === 'tomorrow' || currentDayStr === tomorrowStr()) && isTodayStillGoing && (
+              <Pressable onPress={() => moveToToday(item.id)} style={[styles.smallBtn, { backgroundColor: colors.surface2 }]}>
+                <Text style={{ color: colors.text, fontSize: 12 }}>Сегодня</Text>
               </Pressable>
             )}
             <Pressable onPress={() => deleteTask(item.id)} style={styles.smallBtn}>
@@ -553,6 +579,11 @@ export default function DeloScreen() {
     setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, forDay: tomorrow, isOverdue: false } : t)));
   };
 
+  const moveToToday = (id: string) => {
+    const today = todayStr();
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, forDay: today, isOverdue: false } : t)));
+  };
+
   const hasReminderForTodayNotFired = (task: Task) => {
     if (!task.reminderAt) return false;
     const now = Date.now();
@@ -574,6 +605,11 @@ export default function DeloScreen() {
     postponeToTomorrow(task.id);
   };
 
+  const nowLocal = new Date();
+  const endOfToday = new Date(nowLocal);
+  endOfToday.setHours(23, 59, 59, 999);
+  const isTodayStillGoing = nowLocal.getTime() <= endOfToday.getTime();
+
   const setTaskReminder = (id: string, reminderAt: number | null) => {
     const today = todayStr();
     const tomorrow = tomorrowStr();
@@ -590,7 +626,7 @@ export default function DeloScreen() {
         return nextTask;
       });
       syncTaskReminders(next).catch(() => {});
-      syncOverdueReminder(next).catch(() => {});
+      disableOverdueReminders().catch(() => {});
       return next;
     });
   };
@@ -764,11 +800,19 @@ export default function DeloScreen() {
               {completed.map((t) => (
                 <View
                   key={t.id}
-                  style={[styles.taskRow, { backgroundColor: colors.surface, borderColor: colors.border, opacity: 0.75 }]}>
-                  <Pressable onPress={() => toggleTask(t.id)} style={[styles.check, { borderColor: colors.border }]}>
+                  style={[
+                    styles.taskRow,
+                    listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
+                    { backgroundColor: colors.surface, borderColor: colors.border, opacity: 0.75 },
+                  ]}>
+                  <Pressable
+                    onPress={() => toggleTask(t.id)}
+                    style={[styles.check, listMode === 'compact' ? styles.checkCompact : styles.checkExpanded, { borderColor: colors.border }]}>
                     <Text style={{ color: colors.text }}>✓</Text>
                   </Pressable>
-                  <Text style={[styles.taskText, { color: colors.text, textDecorationLine: 'line-through', flex: 1 }]} numberOfLines={2}>
+                  <Text
+                    style={[styles.taskText, { color: colors.text, textDecorationLine: 'line-through', flex: 1 }]}
+                    numberOfLines={listMode === 'compact' ? 1 : 3}>
                     {parseLinksAndPhones(t.text).map((seg, i) =>
                       seg.type === 'text' ? (
                         <Text key={i} style={{ color: colors.text, textDecorationLine: 'line-through' }}>{seg.value}</Text>
@@ -1451,9 +1495,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   taskArrows: { alignItems: 'center', justifyContent: 'center', gap: 0, marginTop: 2 },
+  taskArrowsCompact: { marginTop: 1 },
+  taskArrowsExpanded: { marginTop: 4 },
   taskRowCompact: { paddingVertical: 10 },
   taskRowExpanded: { paddingVertical: 16 },
   check: { width: 26, height: 26, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
+  checkCompact: { width: 24, height: 24, marginTop: 1 },
+  checkExpanded: { width: 28, height: 28, marginTop: 3 },
   taskTextCol: { flex: 1, gap: 4 },
   taskText: { fontSize: 15, lineHeight: 20 },
   taskMeta: { fontSize: 12 },
