@@ -117,6 +117,8 @@ export default function DeloScreen() {
   const [settings, setSettingsState] = useState<Settings | null>(null);
   const [dayView, setDayView] = useState<DayView>('today');
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarMode, setCalendarMode] = useState<'month' | 'week'>('month');
+  const [calendarDotFilter, setCalendarDotFilter] = useState<'all' | 'red' | 'green'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [newTaskText, setNewTaskText] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -243,6 +245,8 @@ export default function DeloScreen() {
 
   const resolvedTheme = useResolvedTheme(settings?.theme ?? 'dark');
   const colors = resolvedTheme === 'dark' ? DARK : LIGHT;
+  const checkBorderColor = resolvedTheme === 'light' ? '#8fa0b5' : '#6b7f99';
+  const checkBgColor = resolvedTheme === 'light' ? '#eef2f7' : '#142133';
 
   useEffect(() => {
     if (!settings) return;
@@ -386,6 +390,15 @@ export default function DeloScreen() {
   const footerPad = 64 + insets.bottom;
   const listMode = settings?.listMode ?? 'compact';
 
+  const dayTaskCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const t of tasks) {
+      if (!t.forDay) continue;
+      counts[t.forDay] = (counts[t.forDay] ?? 0) + 1;
+    }
+    return counts;
+  }, [tasks]);
+
   const markedDates = useMemo(() => {
     const marks: Record<
       string,
@@ -402,16 +415,22 @@ export default function DeloScreen() {
     };
     const isTodayOrFuture = (dateStr: string) => daysUntil(dateStr) >= 0;
     const dotColor = (dateStr: string) => (daysUntil(dateStr) < 7 ? '#ef4444' : '#22c55e'); // red if < 7 days until date, green if >= 7 days
+    const passesDotFilter = (dateStr: string) => {
+      const c = dotColor(dateStr);
+      if (calendarDotFilter === 'red') return c === '#ef4444';
+      if (calendarDotFilter === 'green') return c === '#22c55e';
+      return true;
+    };
 
     // Dates with a reminder or a task: one dot — red if < 7 days until that date, green if >= 7 days
     for (const t of tasks) {
       if (t.reminderAt) {
         const ds = dayStrFromDateLocal(new Date(t.reminderAt));
-        if (isTodayOrFuture(ds)) {
+        if (isTodayOrFuture(ds) && passesDotFilter(ds)) {
           marks[ds] = { marked: true, dots: [{ key: 'dot', color: dotColor(ds) }] };
         }
       }
-      if (t.forDay && isTodayOrFuture(t.forDay) && !marks[t.forDay]) {
+      if (t.forDay && isTodayOrFuture(t.forDay) && passesDotFilter(t.forDay) && !marks[t.forDay]) {
         marks[t.forDay] = { marked: true, dots: [{ key: 'dot', color: dotColor(t.forDay) }] };
       }
     }
@@ -419,12 +438,29 @@ export default function DeloScreen() {
     const cur = marks[currentDayStr];
     marks[currentDayStr] = {
       marked: true,
-      dots: cur?.dots?.length ? cur.dots : [{ key: 'dot', color: dotColor(currentDayStr) }],
+      dots: cur?.dots?.length ? cur.dots : passesDotFilter(currentDayStr) ? [{ key: 'dot', color: dotColor(currentDayStr) }] : [],
       selected: true,
       selectedColor: colors.accent,
     };
     return marks;
-  }, [tasks, currentDayStr, colors.accent]);
+  }, [tasks, currentDayStr, colors.accent, calendarDotFilter]);
+
+  const weekDays = useMemo(() => {
+    const list: { dayStr: DayStr; dayNum: string; weekShort: string; dotColor: string }[] = [];
+    const base = new Date();
+    base.setHours(0, 0, 0, 0);
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(base);
+      d.setDate(base.getDate() + i);
+      const ds = dayStrFromDateLocal(d);
+      const dayNum = String(d.getDate());
+      const weekShort = WEEKDAY_SHORT[d.getDay()];
+      const daysDiff = i;
+      const dotColor = daysDiff < 7 ? '#ef4444' : '#22c55e';
+      list.push({ dayStr: ds, dayNum, weekShort, dotColor });
+    }
+    return list;
+  }, []);
 
   const { incomplete, completed } = useMemo(() => {
     const q = (searchQuery || '').trim().toLowerCase();
@@ -512,7 +548,11 @@ export default function DeloScreen() {
           ]}>
           <Pressable
             onPress={() => toggleTask(item.id)}
-            style={[styles.check, listMode === 'compact' ? styles.checkCompact : styles.checkExpanded, { borderColor: colors.border }]}>
+            style={[
+              styles.check,
+              listMode === 'compact' ? styles.checkCompact : styles.checkExpanded,
+              { borderColor: checkBorderColor, backgroundColor: checkBgColor },
+            ]}>
             <Text style={{ color: colors.text }}>{item.completedAt ? '✓' : ''}</Text>
           </Pressable>
           <View style={styles.taskTextCol}>
@@ -851,7 +891,11 @@ export default function DeloScreen() {
                   ]}>
                   <Pressable
                     onPress={() => toggleTask(t.id)}
-                    style={[styles.check, listMode === 'compact' ? styles.checkCompact : styles.checkExpanded, { borderColor: colors.border }]}>
+                    style={[
+                      styles.check,
+                      listMode === 'compact' ? styles.checkCompact : styles.checkExpanded,
+                      { borderColor: checkBorderColor, backgroundColor: checkBgColor },
+                    ]}>
                     <Text style={{ color: colors.text }}>✓</Text>
                   </Pressable>
                   <Text
@@ -943,38 +987,117 @@ export default function DeloScreen() {
                   <Text style={{ color: colors.muted, fontSize: 18 }}>✕</Text>
                 </Pressable>
               </View>
+              <View style={[styles.row, { marginBottom: 8 }]}>
+                <Pressable
+                  onPress={() => setCalendarMode('month')}
+                  style={[styles.chip, { backgroundColor: calendarMode === 'month' ? colors.accent : colors.surface }]}>
+                  <Text style={{ color: calendarMode === 'month' ? '#fff' : colors.text }}>Месяц</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setCalendarMode('week')}
+                  style={[styles.chip, { backgroundColor: calendarMode === 'week' ? colors.accent : colors.surface }]}>
+                  <Text style={{ color: calendarMode === 'week' ? '#fff' : colors.text }}>Неделя</Text>
+                </Pressable>
+              </View>
               <View style={[styles.calendarListWrap, { overflow: 'hidden' }]}>
-                <CalendarList
-                  pastScrollRange={0}
-                  futureScrollRange={36}
-                  onDayPress={(d) => {
-                    const ds = d.dateString as DayStr;
-                    setDayView(ds);
-                    setCalendarOpen(false);
-                  }}
-                  markingType="multi-dot"
-                  markedDates={markedDates}
-                  style={styles.calendarListOuter}
-                  calendarStyle={styles.calendarListInner}
-                  theme={{
-                  calendarBackground: 'transparent',
-                  dayTextColor: colors.text,
-                  monthTextColor: colors.text,
-                  textDisabledColor: colors.muted,
-                  selectedDayBackgroundColor: colors.accent,
-                  selectedDayTextColor: '#fff',
-                  todayTextColor: colors.accent,
-                  arrowColor: colors.text,
-                  weekVerticalMargin: 4,
-                }}
-                />
+                {calendarMode === 'month' ? (
+                  <CalendarList
+                    pastScrollRange={0}
+                    futureScrollRange={36}
+                    onDayPress={(d) => {
+                      const ds = d.dateString as DayStr;
+                      setDayView(ds);
+                      setCalendarOpen(false);
+                    }}
+                    dayComponent={({ date, state, marking }) => {
+                      if (!date) return <View style={{ width: 36, height: 44 }} />;
+                      const ds = date.dateString as DayStr;
+                      const count = dayTaskCounts[ds] ?? 0;
+                      const selected = Boolean((marking as any)?.selected);
+                      const disabled = state === 'disabled';
+                      return (
+                        <Pressable
+                          onPress={() => {
+                            setDayView(ds);
+                            setCalendarOpen(false);
+                          }}
+                          style={[
+                            styles.calendarDayCell,
+                            selected && { backgroundColor: colors.accent, borderRadius: 10 },
+                          ]}>
+                          <Text style={{ color: disabled ? colors.muted : selected ? '#fff' : colors.text, fontSize: 14 }}>
+                            {date.day}
+                          </Text>
+                          {count > 0 && (
+                            <Text style={{ color: selected ? '#fff' : colors.muted, fontSize: 10, marginTop: 1 }}>{count}</Text>
+                          )}
+                        </Pressable>
+                      );
+                    }}
+                    markingType="multi-dot"
+                    markedDates={markedDates}
+                    style={styles.calendarListOuter}
+                    calendarStyle={styles.calendarListInner}
+                    theme={{
+                      calendarBackground: 'transparent',
+                      dayTextColor: colors.text,
+                      monthTextColor: colors.text,
+                      textDisabledColor: colors.muted,
+                      selectedDayBackgroundColor: colors.accent,
+                      selectedDayTextColor: '#fff',
+                      todayTextColor: colors.accent,
+                      arrowColor: colors.text,
+                      weekVerticalMargin: 4,
+                    }}
+                  />
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingVertical: 8 }}>
+                    {weekDays.map((w) => {
+                      if (calendarDotFilter === 'red' && w.dotColor !== '#ef4444') return null;
+                      if (calendarDotFilter === 'green' && w.dotColor !== '#22c55e') return null;
+                      const selected = currentDayStr === w.dayStr;
+                      const count = dayTaskCounts[w.dayStr] ?? 0;
+                      return (
+                        <Pressable
+                          key={w.dayStr}
+                          onPress={() => {
+                            setDayView(w.dayStr);
+                            setCalendarOpen(false);
+                          }}
+                          style={[
+                            styles.weekChip,
+                            { backgroundColor: selected ? colors.accent : colors.surface, borderColor: colors.border },
+                          ]}>
+                          <Text style={{ color: selected ? '#fff' : colors.text, fontSize: 12 }}>{w.weekShort}</Text>
+                          <Text style={{ color: selected ? '#fff' : colors.text, fontSize: 16, fontWeight: '700' }}>{w.dayNum}</Text>
+                          <Text style={{ color: selected ? '#fff' : colors.muted, fontSize: 11 }}>{count} дел</Text>
+                          <View style={[styles.weekDot, { backgroundColor: w.dotColor }]} />
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                )}
               </View>
               <View style={styles.calendarLegend}>
+                <View style={styles.row}>
+                  <Pressable
+                    onPress={() => setCalendarDotFilter((v) => (v === 'red' ? 'all' : 'red'))}
+                    style={[styles.chip, { backgroundColor: calendarDotFilter === 'red' ? '#ef4444' : colors.surface }]}>
+                    <Text style={{ color: calendarDotFilter === 'red' ? '#fff' : colors.text }}>Красные</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setCalendarDotFilter((v) => (v === 'green' ? 'all' : 'green'))}
+                    style={[styles.chip, { backgroundColor: calendarDotFilter === 'green' ? '#22c55e' : colors.surface }]}>
+                    <Text style={{ color: calendarDotFilter === 'green' ? '#fff' : colors.text }}>Зелёные</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setCalendarDotFilter('all')}
+                    style={[styles.chip, { backgroundColor: calendarDotFilter === 'all' ? colors.accent : colors.surface }]}>
+                    <Text style={{ color: calendarDotFilter === 'all' ? '#fff' : colors.text }}>Все</Text>
+                  </Pressable>
+                </View>
                 <Text style={{ color: colors.muted, fontSize: 12 }}>
-                  Красная точка — до даты остаётся меньше 7 дней.
-                </Text>
-                <Text style={{ color: colors.muted, fontSize: 12 }}>
-                  Зелёная — до даты остаётся 7 дней и больше.
+                  Нажмите цвет, чтобы фильтровать список дат в календаре. Число под датой — количество задач на день.
                 </Text>
               </View>
             </View>
@@ -1585,6 +1708,17 @@ const styles = StyleSheet.create({
   },
   calendarListInner: { marginHorizontal: 0, maxWidth: '100%' },
   calendarLegend: { paddingTop: 8, paddingBottom: 8, gap: 6 },
+  calendarDayCell: { width: 36, height: 44, alignItems: 'center', justifyContent: 'center' },
+  weekChip: {
+    minWidth: 86,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    gap: 2,
+  },
+  weekDot: { width: 8, height: 8, borderRadius: 999, marginTop: 2 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   modalTitle: { fontSize: 18, fontWeight: '800' },
   sectionTitle: { marginTop: 12, marginBottom: 8, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
