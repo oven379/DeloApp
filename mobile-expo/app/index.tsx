@@ -1203,7 +1203,7 @@ export default function DeloScreen() {
                     <View style={{ marginTop: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                       <View>
                         <Text style={{ color: colors.muted, fontSize: 12 }}>Разработано 379team</Text>
-                        <Text style={{ color: colors.muted, fontSize: 12 }}>Версия 1.0.0</Text>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>Версия 1.0.1</Text>
                       </View>
                       <Pressable
                         onPress={() => Linking.openURL('https://delodelai.ru').catch(() => {})}
