@@ -415,9 +415,16 @@ export default function DeloScreen() {
   const addTask = (text: string, forDay?: DayStr) => {
     const day = forDay ?? currentDayStr;
     setTasks((prev) => {
-      const forThatDay = prev.filter((t) => t.forDay === day);
-      const maxOrder = forThatDay.length === 0 ? 0 : Math.max(0, ...forThatDay.map((t) => t.order ?? 0));
-      return [...prev, createTask(text, maxOrder + 1, day)];
+      // Новая задача должна появляться ВВЕРХ списка.
+      // Для невыполненных задач используем `order` как индекс сверху вниз:
+      // 1) новой задачe ставим order=0
+      // 2) остальным невыполненным на этом дне увеличиваем order на 1
+      const shifted = prev.map((t) => {
+        if (t.forDay !== day) return t;
+        if (t.completedAt) return t;
+        return { ...t, order: (t.order ?? 0) + 1 };
+      });
+      return [...shifted, createTask(text, 0, day)];
     });
   };
 
