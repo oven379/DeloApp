@@ -365,15 +365,18 @@ export default function DeloScreen() {
       const t = new Date(y, m - 1, d).getTime();
       return Math.round((t - todayTime) / (24 * 60 * 60 * 1000));
     };
+    const isTodayOrFuture = (dateStr: string) => daysUntil(dateStr) >= 0;
     const dotColor = (dateStr: string) => (daysUntil(dateStr) < 7 ? '#ef4444' : '#22c55e'); // red if < 7 days until date, green if >= 7 days
 
     // Dates with a reminder or a task: one dot — red if < 7 days until that date, green if >= 7 days
     for (const t of tasks) {
       if (t.reminderAt) {
         const ds = new Date(t.reminderAt).toISOString().slice(0, 10);
-        marks[ds] = { marked: true, dots: [{ key: 'dot', color: dotColor(ds) }] };
+        if (isTodayOrFuture(ds)) {
+          marks[ds] = { marked: true, dots: [{ key: 'dot', color: dotColor(ds) }] };
+        }
       }
-      if (t.forDay && !marks[t.forDay]) {
+      if (t.forDay && isTodayOrFuture(t.forDay) && !marks[t.forDay]) {
         marks[t.forDay] = { marked: true, dots: [{ key: 'dot', color: dotColor(t.forDay) }] };
       }
     }

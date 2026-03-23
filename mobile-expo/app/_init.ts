@@ -6,4 +6,3 @@ import 'react-native-reanimated';
 export default function Init() {
   return null;
 }
-
