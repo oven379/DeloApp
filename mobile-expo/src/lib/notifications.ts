@@ -95,7 +95,11 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
     );
   }
 
-  await Promise.all(toSchedule);
+  try {
+    await Promise.all(toSchedule);
+  } catch (e) {
+    console.warn('[notifications] syncDailyNotifications failed', e);
+  }
 }
 
 export async function syncTaskReminders(tasks: Task[]) {
@@ -105,20 +109,36 @@ export async function syncTaskReminders(tasks: Task[]) {
   const withReminder = list.filter((t) => t.reminderAt && t.reminderAt > now);
   const withoutReminder = list.filter((t) => !t.reminderAt || (t.reminderAt ?? 0) <= now);
 
-  await Promise.all(withoutReminder.map((t) => cancelTaskById(t.id)));
+  await Promise.all(
+    withoutReminder.map(async (t) => {
+      try {
+        await cancelTaskById(t.id);
+      } catch (e) {
+        console.warn('[notifications] cancelTaskById failed', { taskId: t.id, e });
+      }
+    })
+  );
   await Promise.all(
     withReminder.map(async (t) => {
-      await cancelTaskById(t.id);
+      try {
+        await cancelTaskById(t.id);
+      } catch (e) {
+        console.warn('[notifications] cancelTaskById before schedule failed', { taskId: t.id, e });
+      }
       const taskSummary = (t.text || 'Без названия').trim().slice(0, 80);
       const body = taskSummary ? `Напоминание: ${taskSummary}` : 'Напоминание о деле';
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: APP_TITLE,
-          body,
-          data: { tag: TAG_TASK, taskId: t.id },
-        },
-        trigger: { date: new Date(t.reminderAt!), channelId: CHANNEL_ID } as any,
-      });
+      try {
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: APP_TITLE,
+            body,
+            data: { tag: TAG_TASK, taskId: t.id },
+          },
+          trigger: { date: new Date(t.reminderAt!), channelId: CHANNEL_ID } as any,
+        });
+      } catch (e) {
+        console.warn('[notifications] scheduleNotificationAsync failed', { taskId: t.id, reminderAt: t.reminderAt, e });
+      }
     })
   );
 }

@@ -217,7 +217,7 @@ export default function DeloScreen() {
         // Также отключаем устаревшие "просроченные" уведомления (если были запланированы в прошлых версиях).
         requestPermissions()
           .then(() => disableOverdueReminders())
-          .catch(() => {});
+          .catch((e) => console.warn('[notifications] init failed', e));
 
         const response = await Notifications.getLastNotificationResponseAsync();
         if (!cancelled) handleNotificationOpen(response);
@@ -324,7 +324,9 @@ export default function DeloScreen() {
     if (tasksSyncRef.current) clearTimeout(tasksSyncRef.current);
     tasksSyncRef.current = setTimeout(() => {
       // Only task reminders + ensure overdue reminders are disabled.
-      Promise.all([syncTaskReminders(tasksRef.current), disableOverdueReminders()]).catch(() => {});
+      Promise.all([syncTaskReminders(tasksRef.current), disableOverdueReminders()]).catch((e) =>
+        console.warn('[notifications] sync tasks failed', e)
+      );
     }, 800);
     return () => {
       if (tasksSyncRef.current) clearTimeout(tasksSyncRef.current);
@@ -336,7 +338,7 @@ export default function DeloScreen() {
     if (dailySyncRef.current) clearTimeout(dailySyncRef.current);
     dailySyncRef.current = setTimeout(() => {
       // Daily notifications are fixed to 09:00 and 21:00 inside syncDailyNotifications.
-      syncDailyNotifications(dailySlotsRef.current).catch(() => {});
+      syncDailyNotifications(dailySlotsRef.current).catch((e) => console.warn('[notifications] sync daily failed', e));
     }, 800);
     return () => {
       if (dailySyncRef.current) clearTimeout(dailySyncRef.current);
@@ -626,8 +628,8 @@ export default function DeloScreen() {
         }
         return nextTask;
       });
-      syncTaskReminders(next).catch(() => {});
-      disableOverdueReminders().catch(() => {});
+      syncTaskReminders(next).catch((e) => console.warn('[notifications] sync after setTaskReminder failed', e));
+      disableOverdueReminders().catch((e) => console.warn('[notifications] disable overdue after setTaskReminder failed', e));
       return next;
     });
   };
