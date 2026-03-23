@@ -139,6 +139,7 @@ export default function DeloScreen() {
 
   const addInputRef = useRef<TextInput>(null);
   const editingTaskIdRef = useRef<string | null>(null);
+  const tasksRef = useRef<Task[]>([]);
   useEffect(() => {
     editingTaskIdRef.current = editingTaskId;
   }, [editingTaskId]);
@@ -181,7 +182,8 @@ export default function DeloScreen() {
   const handleNotificationOpen = (response: Notifications.NotificationResponse | null | undefined) => {
     if (!response) return;
     const requestId = response.notification.request.identifier;
-    const data = response.notification.request.content.data as { taskId?: string } | undefined;
+    const data = response.notification.request.content.data as { taskId?: unknown } | undefined;
+    const taskId = typeof data?.taskId === 'string' ? data.taskId : undefined;
 
     if (requestId) {
       setReminderNotifications((prev) => prev.filter((n) => n.requestId !== requestId));
@@ -192,9 +194,15 @@ export default function DeloScreen() {
     setSettingsOpen(false);
     setCalendarOpen(false);
     setSearchQuery('');
+    setReminderPickerOpen(false);
+    setPostponeModalTaskId(null);
 
-    if (data?.taskId) {
-      setEditingTaskId(data.taskId);
+    if (taskId) {
+      // Если задача уже есть в стейте — переключим вкладку на её день,
+      // чтобы пользователь видел задачу в правильном контексте.
+      const t = tasksRef.current.find((x) => x.id === taskId);
+      if (t?.forDay) setDayView(t.forDay);
+      setEditingTaskId(taskId);
     } else {
       // For non-task notifications: open main tasks view.
       setEditingTaskId(null);
@@ -308,7 +316,6 @@ export default function DeloScreen() {
 
   const settingsReady = !!settings;
 
-  const tasksRef = useRef<Task[]>([]);
   const dailySlotsRef = useRef<Settings['dailyNotifications']>([]);
 
   useEffect(() => {
@@ -516,13 +523,15 @@ export default function DeloScreen() {
                 )
               )}
             </Text>
-            {listMode === 'expanded' && (
+            {(listMode === 'expanded' || item.reminderAt) && (
               <Text
                 style={[
                   styles.taskMeta,
-                  { color: item.reminderAt && item.reminderAt > Date.now() ? colors.accent : colors.muted },
+                  {
+                    color: item.reminderAt ? (item.reminderAt > Date.now() ? colors.accent : colors.muted) : colors.muted,
+                  },
                 ]}>
-                {item.reminderAt && item.reminderAt > Date.now() ? formatReminderLabel(item.reminderAt) : formatTaskDateTime(item.createdAt)}
+                {item.reminderAt ? formatReminderLabel(item.reminderAt) : formatTaskDateTime(item.createdAt)}
               </Text>
             )}
           </View>
