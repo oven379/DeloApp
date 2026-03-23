@@ -24,7 +24,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 
 import type { DayStr, Settings, Task } from '../src/types';
 import { DEFAULT_SETTINGS, getSettings, getSkipDeleteConfirmUntil, getTasks, saveSettings, saveTasks } from '../src/lib/storage';
-import { createTask, getCurrentDayStr, getDayStats, getTodayStats, rolloverTasks, todayStr, tomorrowStr } from '../src/lib/tasks';
+import { createTask, dayStrFromDateLocal, getCurrentDayStr, getDayStats, getTodayStats, rolloverTasks, todayStr, tomorrowStr } from '../src/lib/tasks';
 import { disableOverdueReminders, requestPermissions, syncDailyNotifications, syncTaskReminders } from '../src/lib/notifications';
 
 const WEEKDAY_SHORT = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
@@ -371,7 +371,7 @@ export default function DeloScreen() {
     // Dates with a reminder or a task: one dot — red if < 7 days until that date, green if >= 7 days
     for (const t of tasks) {
       if (t.reminderAt) {
-        const ds = new Date(t.reminderAt).toISOString().slice(0, 10);
+        const ds = dayStrFromDateLocal(new Date(t.reminderAt));
         if (isTodayOrFuture(ds)) {
           marks[ds] = { marked: true, dots: [{ key: 'dot', color: dotColor(ds) }] };
         }
@@ -614,17 +614,15 @@ export default function DeloScreen() {
   const isTodayStillGoing = nowLocal.getTime() <= endOfToday.getTime();
 
   const setTaskReminder = (id: string, reminderAt: number | null) => {
-    const today = todayStr();
-    const tomorrow = tomorrowStr();
     setTasks((prev) => {
       const next = prev.map((t) => {
         if (t.id !== id) return t;
         const nextTask: Task = { ...t, reminderAt: reminderAt || null };
         if (reminderAt) {
-          const reminderDateStr = new Date(reminderAt).toISOString().slice(0, 10) as DayStr;
-          if (reminderDateStr !== today && reminderDateStr !== tomorrow) {
-            nextTask.forDay = reminderDateStr;
-          }
+          // Переносим задачу на тот день, который соответствует reminderAt (по локальному времени).
+          const reminderDateStr = dayStrFromDateLocal(new Date(reminderAt));
+          nextTask.forDay = reminderDateStr;
+          nextTask.isOverdue = false;
         }
         return nextTask;
       });
