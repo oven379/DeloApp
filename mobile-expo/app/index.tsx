@@ -510,10 +510,6 @@ export default function DeloScreen() {
               opacity: isActive ? 0.7 : 1,
             },
           ]}>
-          <View style={[styles.taskArrows, listMode === 'compact' ? styles.taskArrowsCompact : styles.taskArrowsExpanded]}>
-            <Text style={{ color: colors.accent, fontSize: 12 }}>▲</Text>
-            <Text style={{ color: colors.overdue, fontSize: 12 }}>▼</Text>
-          </View>
           <Pressable
             onPress={() => toggleTask(item.id)}
             style={[styles.check, listMode === 'compact' ? styles.checkCompact : styles.checkExpanded, { borderColor: colors.border }]}>
@@ -569,6 +565,9 @@ export default function DeloScreen() {
             )}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Pressable onLongPress={drag} delayLongPress={120} style={styles.smallBtn} hitSlop={8}>
+              <Text style={{ color: colors.muted, fontSize: 13 }}>⋮⋮</Text>
+            </Pressable>
             <Pressable
               onPress={(e) => {
                 e?.stopPropagation?.();
@@ -1547,9 +1546,6 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
   },
-  taskArrows: { alignItems: 'center', justifyContent: 'center', gap: 0, marginTop: 2 },
-  taskArrowsCompact: { marginTop: 1 },
-  taskArrowsExpanded: { marginTop: 4 },
   taskRowCompact: { paddingVertical: 10 },
   taskRowExpanded: { paddingVertical: 16 },
   check: { width: 26, height: 26, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
