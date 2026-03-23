@@ -243,6 +243,8 @@ export default function DeloScreen() {
 
   const resolvedTheme = useResolvedTheme(settings?.theme ?? 'dark');
   const colors = resolvedTheme === 'dark' ? DARK : LIGHT;
+  const checkBorderColor = resolvedTheme === 'light' ? '#8fa0b5' : '#6b7f99';
+  const checkBgColor = resolvedTheme === 'light' ? '#eef2f7' : '#142133';
 
   useEffect(() => {
     if (!settings) return;
@@ -512,7 +514,11 @@ export default function DeloScreen() {
           ]}>
           <Pressable
             onPress={() => toggleTask(item.id)}
-            style={[styles.check, listMode === 'compact' ? styles.checkCompact : styles.checkExpanded, { borderColor: colors.border }]}>
+            style={[
+              styles.check,
+              listMode === 'compact' ? styles.checkCompact : styles.checkExpanded,
+              { borderColor: checkBorderColor, backgroundColor: checkBgColor },
+            ]}>
             <Text style={{ color: colors.text }}>{item.completedAt ? '✓' : ''}</Text>
           </Pressable>
           <View style={styles.taskTextCol}>
@@ -851,7 +857,11 @@ export default function DeloScreen() {
                   ]}>
                   <Pressable
                     onPress={() => toggleTask(t.id)}
-                    style={[styles.check, listMode === 'compact' ? styles.checkCompact : styles.checkExpanded, { borderColor: colors.border }]}>
+                    style={[
+                      styles.check,
+                      listMode === 'compact' ? styles.checkCompact : styles.checkExpanded,
+                      { borderColor: checkBorderColor, backgroundColor: checkBgColor },
+                    ]}>
                     <Text style={{ color: colors.text }}>✓</Text>
                   </Pressable>
                   <Text
