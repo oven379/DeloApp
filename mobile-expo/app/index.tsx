@@ -326,6 +326,32 @@ export default function DeloScreen() {
     dailySlotsRef.current = settings?.dailyNotifications ?? [];
   }, [settings?.dailyNotifications]);
 
+  const openFromInAppNotification = (n: {
+    requestId: string;
+    taskId: string | null;
+  }) => {
+    // Убираем запись из "Уведомлений" внутри приложения
+    setReminderNotifications((prev) => prev.filter((x) => x.requestId !== n.requestId));
+
+    // Убираем и из системной шторки (если устройство/платформа поддерживает)
+    Notifications.dismissNotificationAsync(n.requestId).catch(() => {});
+
+    // Сбрасываем открытые модалки, чтобы редактор точно отобразился
+    setSettingsOpen(false);
+    setCalendarOpen(false);
+    setReminderPickerOpen(false);
+    setPostponeModalTaskId(null);
+
+    if (n.taskId) {
+      const t = tasksRef.current.find((x) => x.id === n.taskId);
+      if (t?.forDay) setDayView(t.forDay);
+      setEditingTaskId(n.taskId);
+    } else {
+      setEditingTaskId(null);
+      setDayView('today');
+    }
+  };
+
   useEffect(() => {
     if (!settingsReady) return;
     if (tasksSyncRef.current) clearTimeout(tasksSyncRef.current);
@@ -1002,14 +1028,22 @@ export default function DeloScreen() {
                     ) : (
                       <>
                         {reminderNotifications.slice(-8).reverse().map((n) => (
-                          <View key={n.id} style={[styles.slotRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-                            <Text style={{ color: colors.text, flex: 1 }} numberOfLines={2}>
-                              {n.text}
-                            </Text>
-                            <Text style={{ color: colors.muted }}>
-                              {new Date(n.firedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                            </Text>
-                          </View>
+                              <Pressable
+                                key={n.id}
+                                onPress={() =>
+                                  openFromInAppNotification({
+                                    requestId: n.requestId,
+                                    taskId: n.taskId,
+                                  })
+                                }
+                                style={[styles.slotRow, { borderColor: colors.border, backgroundColor: colors.surface }]}>
+                                <Text style={{ color: colors.text, flex: 1 }} numberOfLines={2}>
+                                  {n.text}
+                                </Text>
+                                <Text style={{ color: colors.muted }}>
+                                  {new Date(n.firedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                                </Text>
+                              </Pressable>
                         ))}
                         <Pressable
                           onPress={() => {
