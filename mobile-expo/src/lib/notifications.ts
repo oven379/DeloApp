@@ -26,18 +26,26 @@ async function ensureAndroidChannel() {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
     name: 'Напоминания',
-    importance: Notifications.AndroidImportance.HIGH,
+    importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#4caf50',
-    // NOTE: кастомный звук требует добавления файла в android res/raw при сборке.
-    // Пока используем системный звук, чтобы всё работало в Expo Go.
+    sound: 'default',
   });
 }
 
 export async function requestPermissions() {
   await ensureAndroidChannel();
+  const current = await Notifications.getPermissionsAsync();
+  if (current.granted || current.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
+    return current;
+  }
   const res = await Notifications.requestPermissionsAsync();
   return res;
+}
+
+async function hasNotificationPermission() {
+  const p = await Notifications.getPermissionsAsync();
+  return !!(p.granted || p.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL);
 }
 
 async function cancelByTag(tag: string) {
@@ -61,6 +69,10 @@ async function cancelTaskById(taskId: string) {
 
 export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
   await ensureAndroidChannel();
+  if (!(await hasNotificationPermission())) {
+    console.warn('[notifications] permission denied: skip daily notifications');
+    return;
+  }
   await cancelByTag(TAG_DAILY_MORNING);
   await cancelByTag(TAG_DAILY_EVENING);
 
@@ -74,7 +86,7 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
           title: APP_TITLE,
           body: list[0].text || 'Проверь свои планы на сегодня.',
           data: { tag: TAG_DAILY_MORNING },
-          sound: Platform.OS === 'android' ? undefined : undefined,
+          sound: 'default',
         },
         // Only 09:00
         trigger: { hour: 9, minute: 0, repeats: true, channelId: CHANNEL_ID } as any,
@@ -88,6 +100,7 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
           title: APP_TITLE,
           body: list[1].text || 'Проверь свои дела на завтра.',
           data: { tag: TAG_DAILY_EVENING },
+          sound: 'default',
         },
         // Only 21:00
         trigger: { hour: 21, minute: 0, repeats: true, channelId: CHANNEL_ID } as any,
@@ -104,6 +117,10 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
 
 export async function syncTaskReminders(tasks: Task[]) {
   await ensureAndroidChannel();
+  if (!(await hasNotificationPermission())) {
+    console.warn('[notifications] permission denied: skip task reminders');
+    return;
+  }
   const now = Date.now();
   const list = tasks || [];
   const withReminder = list.filter((t) => t.reminderAt && t.reminderAt > now);
@@ -133,6 +150,7 @@ export async function syncTaskReminders(tasks: Task[]) {
             title: APP_TITLE,
             body,
             data: { tag: TAG_TASK, taskId: t.id },
+            sound: 'default',
           },
           trigger: { date: new Date(t.reminderAt!), channelId: CHANNEL_ID } as any,
         });

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
   Dimensions,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -113,6 +114,7 @@ function parseLinksAndPhones(text: string): TextSegment[] {
 
 export default function DeloScreen() {
   const insets = useSafeAreaInsets();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [settings, setSettingsState] = useState<Settings | null>(null);
   const [dayView, setDayView] = useState<DayView>('today');
@@ -140,6 +142,20 @@ export default function DeloScreen() {
   const addInputRef = useRef<TextInput>(null);
   const editingTaskIdRef = useRef<string | null>(null);
   const tasksRef = useRef<Task[]>([]);
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+      setKeyboardHeight(e.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   useEffect(() => {
     editingTaskIdRef.current = editingTaskId;
   }, [editingTaskId]);
@@ -245,6 +261,7 @@ export default function DeloScreen() {
   const colors = resolvedTheme === 'dark' ? DARK : LIGHT;
   const checkBorderColor = resolvedTheme === 'light' ? '#8fa0b5' : '#6b7f99';
   const checkBgColor = resolvedTheme === 'light' ? '#eef2f7' : '#142133';
+  const pickerLabelColor = resolvedTheme === 'dark' ? '#cbd5e1' : colors.muted;
 
   useEffect(() => {
     if (!settings) return;
@@ -384,8 +401,10 @@ export default function DeloScreen() {
   const stats = dayView === 'today' ? getTodayStats(tasks) : getDayStats(tasks, currentDayStr);
   const headerDateLabel = formatHeaderDate(dayView);
 
-  // Footer is fixed to bottom; keep list content above it.
-  const footerPad = 64 + insets.bottom;
+  // Footer is fixed to bottom; keep enough space so the last task is fully visible.
+  const footerPad = 96 + insets.bottom;
+  const footerBottom = Platform.OS === 'android' ? keyboardHeight : 0;
+  const footerPaddingBottom = 10 + (Platform.OS === 'android' && keyboardHeight > 0 ? 0 : insets.bottom);
   const listMode = settings?.listMode ?? 'compact';
 
   const markedDates = useMemo(() => {
@@ -842,74 +861,84 @@ export default function DeloScreen() {
                 )}
               </View>
             }
-          />
-
-          {completed.length > 0 && (
-            <View style={styles.doneWrap}>
-              <Text style={[styles.doneTitle, { color: colors.muted }]}>Готово</Text>
-              {completed.map((t) => (
-                <View
-                  key={t.id}
-                  style={[
-                    styles.taskRow,
-                    listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
-                    { backgroundColor: colors.surface, borderColor: colors.border, opacity: 0.75 },
-                  ]}>
-                  <Pressable
-                    onPress={() => toggleTask(t.id)}
-                    style={[
-                      styles.check,
-                      listMode === 'compact' ? styles.checkCompact : styles.checkExpanded,
-                      { borderColor: checkBorderColor, backgroundColor: checkBgColor },
-                    ]}>
-                    <Text style={{ color: colors.text }}>✓</Text>
-                  </Pressable>
-                  <Text
-                    style={[styles.taskText, { color: colors.text, textDecorationLine: 'line-through', flex: 1 }]}
-                    numberOfLines={listMode === 'compact' ? 1 : 3}>
-                    {parseLinksAndPhones(t.text).map((seg, i) =>
-                      seg.type === 'text' ? (
-                        <Text key={i} style={{ color: colors.text, textDecorationLine: 'line-through' }}>{seg.value}</Text>
-                      ) : seg.type === 'link' ? (
-                        <Text
-                          key={i}
-                          style={{ color: colors.link, textDecorationLine: 'underline' }}
-                          onPress={() => {
-                            const url = seg.url.startsWith('http') ? seg.url : `https://${seg.url}`;
-                            Linking.openURL(url).catch(() => {});
-                          }}>
-                          {seg.label}
-                        </Text>
-                      ) : seg.type === 'url' ? (
-                        <Text
-                          key={i}
-                          style={{ color: colors.link, textDecorationLine: 'underline' }}
-                          onPress={() => {
-                            const url = seg.value.startsWith('http') ? seg.value : `https://${seg.value}`;
-                            Linking.openURL(url).catch(() => {});
-                          }}>
-                          {seg.value}
-                        </Text>
-                      ) : (
-                        <Text
-                          key={i}
-                          style={{ color: colors.link, textDecorationLine: 'underline' }}
-                          onPress={() => Linking.openURL(`tel:${seg.value.replace(/\D/g, '')}`).catch(() => {})}>
-                          {seg.value}
-                        </Text>
-                      )
-                    )}
-                  </Text>
-                  <Pressable onPress={() => deleteTask(t.id)} style={styles.smallBtn}>
-                    <Text style={{ color: colors.muted }}>🗑️</Text>
-                  </Pressable>
+            ListFooterComponent={
+              completed.length > 0 ? (
+                <View style={styles.doneWrap}>
+                  <Text style={[styles.doneTitle, { color: colors.muted }]}>Готово</Text>
+                  {completed.map((t) => (
+                    <View
+                      key={t.id}
+                      style={[
+                        styles.taskRow,
+                        listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
+                        { backgroundColor: colors.surface, borderColor: colors.border, opacity: 0.75 },
+                      ]}>
+                      <Pressable
+                        onPress={() => toggleTask(t.id)}
+                        style={[
+                          styles.check,
+                          listMode === 'compact' ? styles.checkCompact : styles.checkExpanded,
+                          { borderColor: checkBorderColor, backgroundColor: checkBgColor },
+                        ]}>
+                        <Text style={{ color: colors.text }}>✓</Text>
+                      </Pressable>
+                      <Text
+                        style={[styles.taskText, { color: colors.text, textDecorationLine: 'line-through', flex: 1 }]}
+                        numberOfLines={listMode === 'compact' ? 1 : 3}>
+                        {parseLinksAndPhones(t.text).map((seg, i) =>
+                          seg.type === 'text' ? (
+                            <Text key={i} style={{ color: colors.text, textDecorationLine: 'line-through' }}>{seg.value}</Text>
+                          ) : seg.type === 'link' ? (
+                            <Text
+                              key={i}
+                              style={{ color: colors.link, textDecorationLine: 'underline' }}
+                              onPress={() => {
+                                const url = seg.url.startsWith('http') ? seg.url : `https://${seg.url}`;
+                                Linking.openURL(url).catch(() => {});
+                              }}>
+                              {seg.label}
+                            </Text>
+                          ) : seg.type === 'url' ? (
+                            <Text
+                              key={i}
+                              style={{ color: colors.link, textDecorationLine: 'underline' }}
+                              onPress={() => {
+                                const url = seg.value.startsWith('http') ? seg.value : `https://${seg.value}`;
+                                Linking.openURL(url).catch(() => {});
+                              }}>
+                              {seg.value}
+                            </Text>
+                          ) : (
+                            <Text
+                              key={i}
+                              style={{ color: colors.link, textDecorationLine: 'underline' }}
+                              onPress={() => Linking.openURL(`tel:${seg.value.replace(/\D/g, '')}`).catch(() => {})}>
+                              {seg.value}
+                            </Text>
+                          )
+                        )}
+                      </Text>
+                      <Pressable onPress={() => deleteTask(t.id)} style={styles.smallBtn}>
+                        <Text style={{ color: colors.muted }}>🗑️</Text>
+                      </Pressable>
+                    </View>
+                  ))}
                 </View>
-              ))}
-            </View>
-          )}
+              ) : null
+            }
+          />
         </View>
 
-        <View style={[styles.footer, { borderTopColor: colors.border, backgroundColor: colors.bg, paddingBottom: 10 + insets.bottom }]}>
+        <View
+          style={[
+            styles.footer,
+            {
+              borderTopColor: colors.border,
+              backgroundColor: colors.bg,
+              bottom: footerBottom,
+              paddingBottom: footerPaddingBottom,
+            },
+          ]}>
           <TextInput
             ref={addInputRef}
             value={newTaskText}
@@ -1235,7 +1264,7 @@ export default function DeloScreen() {
                 multiline
                 style={[styles.editInput, { backgroundColor: colors.surface, color: colors.text }]}
               />
-              <Text style={{ color: colors.muted, fontSize: 12, marginTop: 4 }}>
+              <Text style={{ color: pickerLabelColor, fontSize: 12, marginTop: 4 }}>
                 Выберите день и время ниже, затем нажмите «Напомнить».
               </Text>
               {(() => {
@@ -1253,7 +1282,7 @@ export default function DeloScreen() {
                   h === 9 && m === 0 ? '09:00' : h === 13 && m === 0 ? '13:00' : h === 15 && m === 0 ? '15:00' : 'Другое';
                 return (
                   <View style={{ marginTop: 12, gap: 12 }}>
-                    <Text style={[styles.sectionTitle, { color: colors.muted, marginTop: 0 }]}>День</Text>
+                    <Text style={[styles.sectionTitle, { color: pickerLabelColor, marginTop: 0 }]}>День</Text>
                     <View style={styles.row}>
                       {(['Сегодня', 'Завтра', 'Дата'] as const).map((label) => (
                         <Pressable
@@ -1279,7 +1308,7 @@ export default function DeloScreen() {
                         </Pressable>
                       ))}
                     </View>
-                    <Text style={[styles.sectionTitle, { color: colors.muted }]}>Время</Text>
+                    <Text style={[styles.sectionTitle, { color: pickerLabelColor }]}>Время</Text>
                     <View style={styles.row}>
                       {[
                         { label: '09:00', h: 9, m: 0 },
