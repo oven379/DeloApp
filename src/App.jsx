@@ -100,6 +100,33 @@ export default function App() {
     applyTheme(settings.theme)
   }, [settings.theme])
 
+  // iOS/Capacitor: при открытии клавиатуры viewport уменьшается, но fixed/sticky элементы могут остаться под клавиатурой.
+  // Поднимаем нижний Input на высоту клавиатуры через CSS-переменную.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+
+    let raf = 0
+    const update = () => {
+      if (raf) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        const keyboard = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))
+        document.documentElement.style.setProperty('--keyboard-offset', `${keyboard}px`)
+      })
+    }
+
+    update()
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    window.addEventListener('orientationchange', update)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+      window.removeEventListener('orientationchange', update)
+    }
+  }, [])
+
   useEffect(() => {
     let list = getTasks()
     const rolled = rolloverTasks(list)
