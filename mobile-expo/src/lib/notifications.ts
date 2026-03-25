@@ -13,6 +13,8 @@ const TAG_TASK = 'task_reminder';
 
 // Overdue reminders were removed: keep TAG_OVERDUE only to cancel old scheduled notifications.
 
+let taskSyncChain: Promise<void> = Promise.resolve();
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -116,49 +118,57 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
 }
 
 export async function syncTaskReminders(tasks: Task[]) {
-  await ensureAndroidChannel();
-  if (!(await hasNotificationPermission())) {
-    console.warn('[notifications] permission denied: skip task reminders');
-    return;
-  }
-  const now = Date.now();
-  const list = tasks || [];
-  const withReminder = list.filter((t) => t.reminderAt && t.reminderAt > now);
-  const withoutReminder = list.filter((t) => !t.reminderAt || (t.reminderAt ?? 0) <= now);
+  // Serialize sync calls to prevent race conditions that can create duplicate scheduled notifications.
+  // Example race: two syncTaskReminders() calls run concurrently → both cancel (nothing yet) → both schedule → duplicates.
+  taskSyncChain = taskSyncChain
+    .catch(() => {})
+    .then(async () => {
+      await ensureAndroidChannel();
+      if (!(await hasNotificationPermission())) {
+        console.warn('[notifications] permission denied: skip task reminders');
+        return;
+      }
+      const now = Date.now();
+      const list = tasks || [];
+      const withReminder = list.filter((t) => t.reminderAt && t.reminderAt > now);
+      const withoutReminder = list.filter((t) => !t.reminderAt || (t.reminderAt ?? 0) <= now);
 
-  await Promise.all(
-    withoutReminder.map(async (t) => {
-      try {
-        await cancelTaskById(t.id);
-      } catch (e) {
-        console.warn('[notifications] cancelTaskById failed', { taskId: t.id, e });
-      }
-    })
-  );
-  await Promise.all(
-    withReminder.map(async (t) => {
-      try {
-        await cancelTaskById(t.id);
-      } catch (e) {
-        console.warn('[notifications] cancelTaskById before schedule failed', { taskId: t.id, e });
-      }
-      const taskSummary = (t.text || 'Без названия').trim().slice(0, 80);
-      const body = taskSummary ? `Напоминание: ${taskSummary}` : 'Напоминание о деле';
-      try {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: APP_TITLE,
-            body,
-            data: { tag: TAG_TASK, taskId: t.id },
-            sound: 'default',
-          },
-          trigger: { date: new Date(t.reminderAt!), channelId: CHANNEL_ID } as any,
-        });
-      } catch (e) {
-        console.warn('[notifications] scheduleNotificationAsync failed', { taskId: t.id, reminderAt: t.reminderAt, e });
-      }
-    })
-  );
+      await Promise.all(
+        withoutReminder.map(async (t) => {
+          try {
+            await cancelTaskById(t.id);
+          } catch (e) {
+            console.warn('[notifications] cancelTaskById failed', { taskId: t.id, e });
+          }
+        })
+      );
+      await Promise.all(
+        withReminder.map(async (t) => {
+          try {
+            await cancelTaskById(t.id);
+          } catch (e) {
+            console.warn('[notifications] cancelTaskById before schedule failed', { taskId: t.id, e });
+          }
+          const taskSummary = (t.text || 'Без названия').trim().slice(0, 80);
+          const body = taskSummary ? `Напоминание: ${taskSummary}` : 'Напоминание о деле';
+          try {
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title: APP_TITLE,
+                body,
+                data: { tag: TAG_TASK, taskId: t.id },
+                sound: 'default',
+              },
+              trigger: { date: new Date(t.reminderAt!), channelId: CHANNEL_ID } as any,
+            });
+          } catch (e) {
+            console.warn('[notifications] scheduleNotificationAsync failed', { taskId: t.id, reminderAt: t.reminderAt, e });
+          }
+        })
+      );
+    });
+
+  await taskSyncChain;
 }
 
 export async function disableOverdueReminders() {

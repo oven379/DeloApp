@@ -121,6 +121,7 @@ export default function DeloScreen() {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [newTaskText, setNewTaskText] = useState('');
+  const newTaskTextRef = useRef('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
@@ -262,6 +263,7 @@ export default function DeloScreen() {
   const checkBorderColor = resolvedTheme === 'light' ? '#8fa0b5' : '#6b7f99';
   const checkBgColor = resolvedTheme === 'light' ? '#eef2f7' : '#142133';
   const pickerLabelColor = resolvedTheme === 'dark' ? '#cbd5e1' : colors.muted;
+  const dateTimePickerTextColor = resolvedTheme === 'dark' ? '#e5e7eb' : '#111827';
 
   useEffect(() => {
     if (!settings) return;
@@ -694,8 +696,6 @@ export default function DeloScreen() {
         }
         return nextTask;
       });
-      syncTaskReminders(next).catch((e) => console.warn('[notifications] sync after setTaskReminder failed', e));
-      disableOverdueReminders().catch((e) => console.warn('[notifications] disable overdue after setTaskReminder failed', e));
       return next;
     });
   };
@@ -942,7 +942,10 @@ export default function DeloScreen() {
           <TextInput
             ref={addInputRef}
             value={newTaskText}
-            onChangeText={setNewTaskText}
+            onChangeText={(t) => {
+              newTaskTextRef.current = t;
+              setNewTaskText(t);
+            }}
             placeholder={
               dayView === 'tomorrow'
                 ? 'Добавить дело на завтра…'
@@ -953,9 +956,10 @@ export default function DeloScreen() {
             placeholderTextColor={colors.muted}
             style={[styles.addInput, { backgroundColor: colors.surface, color: colors.text }]}
             onSubmitEditing={(e) => {
-              const v = e.nativeEvent.text?.trim();
+              const v = (e.nativeEvent.text ?? newTaskTextRef.current ?? '').trim();
               if (!v) return;
               addTask(v);
+              newTaskTextRef.current = '';
               setNewTaskText('');
             }}
             returnKeyType="done"
@@ -963,9 +967,10 @@ export default function DeloScreen() {
           <Pressable
             style={[styles.addBtn, { backgroundColor: colors.accent }]}
             onPress={() => {
-              const v = newTaskText.trim();
+              const v = (newTaskTextRef.current || newTaskText || '').trim();
               if (!v) return;
               addTask(v);
+              newTaskTextRef.current = '';
               setNewTaskText('');
             }}>
             <Text style={{ color: '#fff', fontSize: 22, lineHeight: 22 }}>+</Text>
@@ -1181,6 +1186,8 @@ export default function DeloScreen() {
                           value={dailyTimeTemp}
                           mode="time"
                           display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                          themeVariant={resolvedTheme}
+                          {...(Platform.OS === 'ios' ? { textColor: dateTimePickerTextColor } : {})}
                           onChange={(event: DateTimePickerEvent, date?: Date) => {
                             if (Platform.OS === 'android') {
                               if (event.type === 'dismissed') {
@@ -1253,7 +1260,13 @@ export default function DeloScreen() {
             <View style={[styles.modalSheet, { backgroundColor: colors.bg }]}>
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitle, { color: colors.text }]}>Редактировать</Text>
-                <Pressable onPress={closeEditModal}>
+                <Pressable
+                  onPress={closeEditModal}
+                  hitSlop={14}
+                  style={{ padding: 8, marginRight: -8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Закрыть"
+                >
                   <Text style={{ color: colors.muted, fontSize: 18 }}>✕</Text>
                 </Pressable>
               </View>
@@ -1381,6 +1394,8 @@ export default function DeloScreen() {
                     value={reminderTemp}
                     mode="datetime"
                     display="spinner"
+                    themeVariant={resolvedTheme}
+                    textColor={dateTimePickerTextColor}
                     onChange={(_, date) => {
                       if (date) setReminderTempByUser(date);
                     }}
@@ -1412,6 +1427,7 @@ export default function DeloScreen() {
                     value={reminderTemp}
                     mode={reminderAndroidMode}
                     display="default"
+                    themeVariant={resolvedTheme}
                     onChange={(event: DateTimePickerEvent, date?: Date) => {
                       if (event.type === 'dismissed') {
                         setReminderPickerOpen(false);
