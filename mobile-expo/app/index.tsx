@@ -1013,7 +1013,8 @@ export default function DeloScreen() {
               </View>
               <View style={[styles.calendarListWrap, { overflow: 'hidden' }]}>
                 <CalendarList
-                  pastScrollRange={0}
+                  // Allow navigating to past dates to review previous tasks.
+                  pastScrollRange={24}
                   futureScrollRange={36}
                   onDayPress={(d) => {
                     const ds = d.dateString as DayStr;
