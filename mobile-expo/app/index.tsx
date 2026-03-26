@@ -144,11 +144,13 @@ export default function DeloScreen() {
   const editingTaskIdRef = useRef<string | null>(null);
   const tasksRef = useRef<Task[]>([]);
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    const showSub = Keyboard.addListener('keyboardDidShow', (e) => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
       setKeyboardHeight(e.endCoordinates?.height ?? 0);
     });
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+    const hideSub = Keyboard.addListener(hideEvent, () => {
       setKeyboardHeight(0);
     });
     return () => {
@@ -405,8 +407,8 @@ export default function DeloScreen() {
 
   // Footer is fixed to bottom; keep enough space so the last task is fully visible.
   const footerPad = 96 + insets.bottom;
-  const footerBottom = Platform.OS === 'android' ? keyboardHeight : 0;
-  const footerPaddingBottom = 10 + (Platform.OS === 'android' && keyboardHeight > 0 ? 0 : insets.bottom);
+  const footerBottom = keyboardHeight;
+  const footerPaddingBottom = 10 + (keyboardHeight > 0 ? 0 : insets.bottom);
   const listMode = settings?.listMode ?? 'compact';
 
   const markedDates = useMemo(() => {
