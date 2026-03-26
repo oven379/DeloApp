@@ -152,6 +152,10 @@ export async function syncTaskReminders(tasks: Task[]) {
           const taskSummary = (t.text || 'Без названия').trim().slice(0, 80);
           const body = taskSummary ? `Напоминание: ${taskSummary}` : 'Напоминание о деле';
           try {
+            const trigger =
+              Platform.OS === 'android'
+                ? ({ date: new Date(t.reminderAt!), channelId: CHANNEL_ID } as any)
+                : (new Date(t.reminderAt!) as any);
             await Notifications.scheduleNotificationAsync({
               content: {
                 title: APP_TITLE,
@@ -159,7 +163,7 @@ export async function syncTaskReminders(tasks: Task[]) {
                 data: { tag: TAG_TASK, taskId: t.id },
                 sound: 'default',
               },
-              trigger: { date: new Date(t.reminderAt!), channelId: CHANNEL_ID } as any,
+              trigger,
             });
           } catch (e) {
             console.warn('[notifications] scheduleNotificationAsync failed', { taskId: t.id, reminderAt: t.reminderAt, e });
