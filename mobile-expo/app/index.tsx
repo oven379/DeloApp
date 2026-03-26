@@ -179,6 +179,12 @@ export default function DeloScreen() {
     return `${day}.${month}.${year} · ${h}:${m}`;
   }
 
+  function formatCreatedOrUpdated(t: Task) {
+    const ts = t.updatedAt || t.createdAt;
+    const prefix = t.updatedAt ? 'Изменено' : 'Создано';
+    return `${prefix}: ${formatTaskDateTime(ts)}`;
+  }
+
   function formatReminderLabel(reminderAt: number) {
     const d = new Date(reminderAt);
     const h = String(d.getHours()).padStart(2, '0');
@@ -589,7 +595,7 @@ export default function DeloScreen() {
                     color: item.reminderAt ? (item.reminderAt > Date.now() ? colors.accent : colors.muted) : colors.muted,
                   },
                 ]}>
-                {item.reminderAt ? formatReminderLabel(item.reminderAt) : formatTaskDateTime(item.createdAt)}
+                {item.reminderAt ? formatReminderLabel(item.reminderAt) : formatCreatedOrUpdated(item)}
               </Text>
             )}
           </View>
@@ -626,7 +632,14 @@ export default function DeloScreen() {
   };
 
   const updateTask = (id: string, text: string) => {
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, text: text.trim(), isOverdue: false } : t)));
+    const nextText = text.trim();
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        if ((t.text || '').trim() === nextText) return t;
+        return { ...t, text: nextText, isOverdue: false, updatedAt: Date.now() };
+      })
+    );
   };
 
   const deleteTask = (id: string) => {
@@ -695,6 +708,10 @@ export default function DeloScreen() {
           const reminderDateStr = dayStrFromDateLocal(new Date(reminderAt));
           nextTask.forDay = reminderDateStr;
           nextTask.isOverdue = false;
+        }
+        // Любая смена напоминания — это изменение задачи.
+        if ((t.reminderAt ?? null) !== (reminderAt ?? null)) {
+          nextTask.updatedAt = Date.now();
         }
         return nextTask;
       });

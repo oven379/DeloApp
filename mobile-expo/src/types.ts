@@ -4,6 +4,8 @@ export type Task = {
   id: string;
   text: string;
   createdAt: number;
+  /** Последнее изменение текста/напоминания (если было) */
+  updatedAt?: number | null;
   forDay: DayStr;
   completedAt: number | null;
   isOverdue: boolean;

@@ -32,6 +32,7 @@ export function createTask(text: string, order = 0, forDay?: DayStr | null): Tas
     id: `t_${now}_${Math.random().toString(36).slice(2, 9)}`,
     text: text.trim(),
     createdAt: now,
+    updatedAt: null,
     forDay: day,
     completedAt: null,
     isOverdue: false,
