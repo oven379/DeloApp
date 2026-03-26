@@ -415,8 +415,11 @@ export default function TaskItem({
               )}
             </>
           )}
-          <span className="task-date" title="Когда вспомнил">
-            {formatTaskDate(task.createdAt)}
+          <span
+            className="task-date"
+            title={task.updatedAt ? 'Изменено' : 'Создано'}
+          >
+            {task.updatedAt ? `Изменено: ${formatTaskDate(task.updatedAt)}` : `Создано: ${formatTaskDate(task.createdAt)}`}
           </span>
           {isOverdue && task.originalForDay && (
             <span className="task-date task-date--overdue" title="Перенесено с этой даты">

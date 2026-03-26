@@ -261,9 +261,14 @@ export default function App() {
   }, [])
 
   const updateTask = useCallback((id, text) => {
+    const nextText = text.trim()
     setTasks((prev) =>
       prev.map((t) =>
-        t.id === id ? { ...t, text: text.trim(), isOverdue: false, forDay: t.forDay } : t
+        t.id === id
+          ? ((t.text || '').trim() === nextText
+              ? t
+              : { ...t, text: nextText, isOverdue: false, forDay: t.forDay, updatedAt: Date.now() })
+          : t
       )
     )
   }, [])
@@ -287,6 +292,9 @@ export default function App() {
           if (reminderDateStr !== today && reminderDateStr !== tomorrow) {
             next.forDay = reminderDateStr
           }
+        }
+        if ((t.reminderAt || null) !== (reminderAt || null)) {
+          next.updatedAt = Date.now()
         }
         return next
       })
