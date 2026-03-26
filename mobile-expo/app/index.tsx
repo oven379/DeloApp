@@ -62,6 +62,11 @@ function taskSortKey(t: Task) {
   return t.order ?? 0;
 }
 
+function isPastDayStr(day: DayStr) {
+  // DayStr is YYYY-MM-DD, so lexical compare works.
+  return day < todayStr();
+}
+
 type TextSegment =
   | { type: 'text'; value: string }
   | { type: 'url'; value: string }
@@ -413,6 +418,7 @@ export default function DeloScreen() {
   }, [dailyNotificationsKey, settingsReady]);
 
   const currentDayStr = getCurrentDayStr(dayView);
+  const canCreateTasksForSelectedDay = !isPastDayStr(currentDayStr);
   const stats = dayView === 'today' ? getTodayStats(tasks) : getDayStats(tasks, currentDayStr);
   const headerDateLabel = formatHeaderDate(dayView);
 
@@ -476,6 +482,7 @@ export default function DeloScreen() {
 
   const addTask = (text: string, forDay?: DayStr) => {
     const day = forDay ?? currentDayStr;
+    if (isPastDayStr(day)) return;
     setTasks((prev) => {
       // Новая задача должна появляться ВВЕРХ списка.
       // Для невыполненных задач используем `order` как индекс сверху вниз:
@@ -978,8 +985,13 @@ export default function DeloScreen() {
                   : 'Добавить дело…'
             }
             placeholderTextColor={colors.muted}
-            style={[styles.addInput, { backgroundColor: colors.surface, color: colors.text }]}
+            editable={canCreateTasksForSelectedDay}
+            style={[
+              styles.addInput,
+              { backgroundColor: colors.surface, color: colors.text, opacity: canCreateTasksForSelectedDay ? 1 : 0.55 },
+            ]}
             onSubmitEditing={(e) => {
+              if (!canCreateTasksForSelectedDay) return;
               const v = (e.nativeEvent.text ?? newTaskTextRef.current ?? '').trim();
               if (!v) return;
               addTask(v);
@@ -989,8 +1001,10 @@ export default function DeloScreen() {
             returnKeyType="done"
           />
           <Pressable
-            style={[styles.addBtn, { backgroundColor: colors.accent }]}
+            disabled={!canCreateTasksForSelectedDay}
+            style={[styles.addBtn, { backgroundColor: colors.accent, opacity: canCreateTasksForSelectedDay ? 1 : 0.55 }]}
             onPress={() => {
+              if (!canCreateTasksForSelectedDay) return;
               const v = (newTaskTextRef.current || newTaskText || '').trim();
               if (!v) return;
               addTask(v);
