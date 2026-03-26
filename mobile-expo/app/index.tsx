@@ -26,7 +26,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import type { DayStr, Settings, Task } from '../src/types';
 import { DEFAULT_SETTINGS, getSettings, getSkipDeleteConfirmUntil, getTasks, saveSettings, saveTasks } from '../src/lib/storage';
 import { createTask, dayStrFromDateLocal, getCurrentDayStr, getDayStats, getTodayStats, rolloverTasks, todayStr, tomorrowStr } from '../src/lib/tasks';
-import { disableOverdueReminders, requestPermissions, syncDailyNotifications, syncTaskReminders } from '../src/lib/notifications';
+import { disableOverdueReminders, requestPermissions, scheduleTestNotification, syncDailyNotifications, syncTaskReminders } from '../src/lib/notifications';
 
 const WEEKDAY_SHORT = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
 
@@ -146,15 +146,20 @@ export default function DeloScreen() {
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const changeFrameEvent = Platform.OS === 'ios' ? 'keyboardWillChangeFrame' : 'keyboardDidChangeFrame';
 
     const showSub = Keyboard.addListener(showEvent, (e) => {
       setKeyboardHeight(e.endCoordinates?.height ?? 0);
+    });
+    const changeSub = Keyboard.addListener(changeFrameEvent as any, (e: any) => {
+      setKeyboardHeight(e?.endCoordinates?.height ?? 0);
     });
     const hideSub = Keyboard.addListener(hideEvent, () => {
       setKeyboardHeight(0);
     });
     return () => {
       showSub.remove();
+      changeSub.remove();
       hideSub.remove();
     };
   }, []);
@@ -1085,6 +1090,14 @@ export default function DeloScreen() {
                 {settingsTab === 'notifications' ? (
                   <>
                     <Text style={[styles.sectionTitle, { color: colors.muted, marginTop: 0 }]}>УВЕДОМЛЕНИЯ</Text>
+                    <Pressable
+                      onPress={() => {
+                        scheduleTestNotification().catch(() => {});
+                      }}
+                      style={[styles.primaryBtn, { backgroundColor: colors.surface2, marginTop: 8 }]}
+                    >
+                      <Text style={{ color: colors.text }}>Тестовое уведомление (через 5 секунд)</Text>
+                    </Pressable>
                     {reminderNotifications.length === 0 ? (
                       <Text style={{ color: colors.muted }}>Здесь будут ваши напоминания.</Text>
                     ) : (

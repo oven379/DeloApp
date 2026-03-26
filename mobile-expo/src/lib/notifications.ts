@@ -50,6 +50,25 @@ async function hasNotificationPermission() {
   return !!(p.granted || p.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL);
 }
 
+export async function scheduleTestNotification() {
+  await ensureAndroidChannel();
+  const p = await Notifications.getPermissionsAsync();
+  const ok = !!(p.granted || p.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL);
+  if (!ok) {
+    console.warn('[notifications] permission denied: cannot schedule test notification');
+    return null;
+  }
+  return await Notifications.scheduleNotificationAsync({
+    content: {
+      title: APP_TITLE,
+      body: 'Тестовое уведомление (проверка звука и доставки).',
+      data: { tag: 'test' },
+      sound: 'default',
+    },
+    trigger: Platform.OS === 'android' ? ({ seconds: 5, channelId: CHANNEL_ID } as any) : ({ seconds: 5 } as any),
+  });
+}
+
 async function cancelByTag(tag: string) {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   const toCancel = scheduled
