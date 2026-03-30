@@ -50,24 +50,7 @@ async function hasNotificationPermission() {
   return !!(p.granted || p.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL);
 }
 
-export async function scheduleTestNotification() {
-  await ensureAndroidChannel();
-  const p = await Notifications.getPermissionsAsync();
-  const ok = !!(p.granted || p.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL);
-  if (!ok) {
-    console.warn('[notifications] permission denied: cannot schedule test notification');
-    return null;
-  }
-  return await Notifications.scheduleNotificationAsync({
-    content: {
-      title: APP_TITLE,
-      body: 'Тестовое уведомление (проверка звука и доставки).',
-      data: { tag: 'test' },
-      sound: 'default',
-    },
-    trigger: Platform.OS === 'android' ? ({ seconds: 5, channelId: CHANNEL_ID } as any) : ({ seconds: 5 } as any),
-  });
-}
+// (debug helpers removed from UI)
 
 async function cancelByTag(tag: string) {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
@@ -108,9 +91,13 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
           body: list[0].text || 'Проверь свои планы на сегодня.',
           data: { tag: TAG_DAILY_MORNING },
           sound: 'default',
+          ...(Platform.OS === 'android' ? { android: { channelId: CHANNEL_ID } } : null),
         },
         // Only 09:00
-        trigger: { hour: 9, minute: 0, repeats: true, channelId: CHANNEL_ID } as any,
+        trigger:
+          Platform.OS === 'android'
+            ? ({ hour: 9, minute: 0, repeats: true, channelId: CHANNEL_ID } as any)
+            : ({ hour: 9, minute: 0, repeats: true } as any),
       })
     );
   }
@@ -122,9 +109,13 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
           body: list[1].text || 'Проверь свои дела на завтра.',
           data: { tag: TAG_DAILY_EVENING },
           sound: 'default',
+          ...(Platform.OS === 'android' ? { android: { channelId: CHANNEL_ID } } : null),
         },
         // Only 21:00
-        trigger: { hour: 21, minute: 0, repeats: true, channelId: CHANNEL_ID } as any,
+        trigger:
+          Platform.OS === 'android'
+            ? ({ hour: 21, minute: 0, repeats: true, channelId: CHANNEL_ID } as any)
+            : ({ hour: 21, minute: 0, repeats: true } as any),
       })
     );
   }
@@ -171,9 +162,10 @@ export async function syncTaskReminders(tasks: Task[]) {
           const taskSummary = (t.text || 'Без названия').trim().slice(0, 80);
           const body = taskSummary ? `Напоминание: ${taskSummary}` : 'Напоминание о деле';
           try {
+            // Android is more reliable with timestamp-based trigger (ms) rather than Date object in some environments/emulators.
             const trigger =
               Platform.OS === 'android'
-                ? ({ date: new Date(t.reminderAt!), channelId: CHANNEL_ID } as any)
+                ? ({ timestamp: Math.floor((t.reminderAt ?? 0) / 1000), channelId: CHANNEL_ID } as any)
                 : (new Date(t.reminderAt!) as any);
             await Notifications.scheduleNotificationAsync({
               content: {
@@ -181,6 +173,7 @@ export async function syncTaskReminders(tasks: Task[]) {
                 body,
                 data: { tag: TAG_TASK, taskId: t.id },
                 sound: 'default',
+                ...(Platform.OS === 'android' ? { android: { channelId: CHANNEL_ID } } : null),
               },
               trigger,
             });

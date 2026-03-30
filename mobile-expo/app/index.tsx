@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Constants from 'expo-constants';
 import {
   AppState,
   Dimensions,
@@ -26,7 +27,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import type { DayStr, Settings, Task } from '../src/types';
 import { DEFAULT_SETTINGS, getSettings, getSkipDeleteConfirmUntil, getTasks, saveSettings, saveTasks } from '../src/lib/storage';
 import { createTask, dayStrFromDateLocal, getCurrentDayStr, getDayStats, getTodayStats, rolloverTasks, todayStr, tomorrowStr } from '../src/lib/tasks';
-import { disableOverdueReminders, requestPermissions, scheduleTestNotification, syncDailyNotifications, syncTaskReminders } from '../src/lib/notifications';
+import { disableOverdueReminders, requestPermissions, syncDailyNotifications, syncTaskReminders } from '../src/lib/notifications';
 
 const WEEKDAY_SHORT = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
 
@@ -130,6 +131,7 @@ export default function DeloScreen() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
+  const [subtaskDraft, setSubtaskDraft] = useState('');
   const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
   const [reminderTemp, setReminderTemp] = useState<Date>(new Date());
   const [showPastReminderWarning, setShowPastReminderWarning] = useState(false);
@@ -278,6 +280,14 @@ export default function DeloScreen() {
 
   const resolvedTheme = useResolvedTheme(settings?.theme ?? 'dark');
   const colors = resolvedTheme === 'dark' ? DARK : LIGHT;
+  const appVersion = Constants.expoConfig?.version ?? Constants.manifest2?.extra?.expoClient?.version ?? '—';
+  const buildLabel =
+    Platform.OS === 'ios'
+      ? Constants.expoConfig?.ios?.buildNumber
+      : Platform.OS === 'android'
+        ? Constants.expoConfig?.android?.versionCode
+        : undefined;
+  const versionLabel = buildLabel != null ? `${appVersion} (${buildLabel})` : String(appVersion);
   const checkBorderColor = resolvedTheme === 'light' ? '#8fa0b5' : '#6b7f99';
   const checkBgColor = resolvedTheme === 'light' ? '#eef2f7' : '#142133';
   const pickerLabelColor = resolvedTheme === 'dark' ? '#cbd5e1' : colors.muted;
@@ -563,10 +573,15 @@ export default function DeloScreen() {
             <Text style={{ color: colors.text }}>{item.completedAt ? '✓' : ''}</Text>
           </Pressable>
           <View style={styles.taskTextCol}>
-            <Text style={[styles.taskText, { color: colors.text }]} numberOfLines={listMode === 'compact' ? 2 : 5}>
+            <Text
+              style={[
+                styles.taskText,
+                { color: colors.text, textDecorationLine: item.completedAt ? 'line-through' : 'none' },
+              ]}
+              numberOfLines={listMode === 'compact' ? 2 : 5}>
               {parseLinksAndPhones(item.text).map((seg, i) =>
                 seg.type === 'text' ? (
-                  <Text key={i} style={{ color: colors.text }}>
+                  <Text key={i} style={{ color: colors.text, textDecorationLine: item.completedAt ? 'line-through' : 'none' }}>
                     {seg.value}
                   </Text>
                 ) : seg.type === 'link' ? (
@@ -650,6 +665,41 @@ export default function DeloScreen() {
         if (t.id !== id) return t;
         if ((t.text || '').trim() === nextText) return t;
         return { ...t, text: nextText, isOverdue: false, updatedAt: Date.now() };
+      })
+    );
+  };
+
+  const addSubtask = (taskId: string, text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== taskId) return t;
+        const list = Array.isArray(t.subtasks) ? t.subtasks : [];
+        const next = [...list, { id: `st_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, text: trimmed, done: false }];
+        return { ...t, subtasks: next, updatedAt: Date.now() };
+      })
+    );
+  };
+
+  const toggleSubtask = (taskId: string, subtaskId: string) => {
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== taskId) return t;
+        const list = Array.isArray(t.subtasks) ? t.subtasks : [];
+        const next = list.map((st) => (st.id === subtaskId ? { ...st, done: !st.done } : st));
+        return { ...t, subtasks: next, updatedAt: Date.now() };
+      })
+    );
+  };
+
+  const deleteSubtask = (taskId: string, subtaskId: string) => {
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== taskId) return t;
+        const list = Array.isArray(t.subtasks) ? t.subtasks : [];
+        const next = list.filter((st) => st.id !== subtaskId);
+        return { ...t, subtasks: next, updatedAt: Date.now() };
       })
     );
   };
@@ -766,6 +816,7 @@ export default function DeloScreen() {
         return;
       }
       setEditDraft(editingTask.text ?? '');
+      setSubtaskDraft('');
       const base =
         editingTask.reminderAt && editingTask.reminderAt > Date.now()
           ? new Date(editingTask.reminderAt)
@@ -774,6 +825,7 @@ export default function DeloScreen() {
       setShowPastReminderWarning(false);
     } else {
       setEditDraft('');
+      setSubtaskDraft('');
       setShowPastReminderWarning(false);
     }
   }, [editingTaskId, editingTask, tasks.length]);
@@ -1105,14 +1157,6 @@ export default function DeloScreen() {
                 {settingsTab === 'notifications' ? (
                   <>
                     <Text style={[styles.sectionTitle, { color: colors.muted, marginTop: 0 }]}>УВЕДОМЛЕНИЯ</Text>
-                    <Pressable
-                      onPress={() => {
-                        scheduleTestNotification().catch(() => {});
-                      }}
-                      style={[styles.primaryBtn, { backgroundColor: colors.surface2, marginTop: 8 }]}
-                    >
-                      <Text style={{ color: colors.text }}>Тестовое уведомление (через 5 секунд)</Text>
-                    </Pressable>
                     {reminderNotifications.length === 0 ? (
                       <Text style={{ color: colors.muted }}>Здесь будут ваши напоминания.</Text>
                     ) : (
@@ -1286,7 +1330,7 @@ export default function DeloScreen() {
                     <View style={{ marginTop: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                       <View>
                         <Text style={{ color: colors.muted, fontSize: 12 }}>Разработано 379team</Text>
-                        <Text style={{ color: colors.muted, fontSize: 12 }}>Версия 1.0.1</Text>
+                        <Text style={{ color: colors.muted, fontSize: 12 }}>Версия {versionLabel}</Text>
                       </View>
                       <Pressable
                         onPress={() => Linking.openURL('https://delodelai.ru').catch(() => {})}
@@ -1317,13 +1361,126 @@ export default function DeloScreen() {
                   <Text style={{ color: colors.muted, fontSize: 18 }}>✕</Text>
                 </Pressable>
               </View>
-              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingBottom: 24 + keyboardHeight }}
+                showsVerticalScrollIndicator={false}>
               <TextInput
                 value={editDraft}
                 onChangeText={setEditDraft}
                 multiline
-                style={[styles.editInput, { backgroundColor: colors.surface, color: colors.text }]}
+                style={[
+                  styles.editInput,
+                  {
+                    backgroundColor: colors.surface,
+                    color: colors.text,
+                    fontSize: settings?.editorFontSize ?? 15,
+                    lineHeight: Math.round((settings?.editorFontSize ?? 15) * 1.35),
+                  },
+                ]}
               />
+              <View style={[styles.row, { marginTop: 10, justifyContent: 'space-between', alignItems: 'center' }]}>
+                <Text style={{ color: colors.muted, fontSize: 12 }}>Размер текста</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Pressable
+                    onPress={() =>
+                      setSettingsState((s) => {
+                        if (!s) return s;
+                        const cur = s.editorFontSize ?? 15;
+                        return { ...s, editorFontSize: Math.max(12, cur - 1) };
+                      })
+                    }
+                    style={[styles.chip, { backgroundColor: colors.surface }]}
+                  >
+                    <Text style={{ color: colors.text }}>A-</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() =>
+                      setSettingsState((s) => {
+                        if (!s) return s;
+                        const cur = s.editorFontSize ?? 15;
+                        return { ...s, editorFontSize: Math.min(24, cur + 1) };
+                      })
+                    }
+                    style={[styles.chip, { backgroundColor: colors.surface }]}
+                  >
+                    <Text style={{ color: colors.text }}>A+</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <Text style={[styles.sectionTitle, { color: colors.muted }]}>ПОДДЕЛА</Text>
+              {(() => {
+                const list = editingTask?.subtasks ?? [];
+                return (
+                  <View style={{ gap: 8 }}>
+                    {list.length === 0 ? (
+                      <Text style={{ color: colors.muted }}>Пока нет поддел.</Text>
+                    ) : (
+                      list.map((st) => (
+                        <View
+                          key={st.id}
+                          style={[
+                            styles.slotRow,
+                            {
+                              borderColor: colors.border,
+                              backgroundColor: colors.surface,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 10,
+                              opacity: st.done ? 0.72 : 1,
+                            },
+                          ]}>
+                          <Pressable onPress={() => toggleSubtask(editingTask!.id, st.id)}>
+                            <Text style={{ color: st.done ? colors.accent : colors.text, fontSize: 18 }}>
+                              {st.done ? '☑' : '☐'}
+                            </Text>
+                          </Pressable>
+                          <Text
+                            style={{
+                              color: st.done ? colors.muted : colors.text,
+                              flex: 1,
+                              textDecorationLine: st.done ? 'line-through' : 'none',
+                            }}
+                            numberOfLines={2}>
+                            {st.text}
+                          </Text>
+                          <Pressable onPress={() => deleteSubtask(editingTask!.id, st.id)} hitSlop={10}>
+                            <Text style={{ color: colors.muted }}>🗑️</Text>
+                          </Pressable>
+                        </View>
+                      ))
+                    )}
+
+                    <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+                      <TextInput
+                        value={subtaskDraft}
+                        onChangeText={setSubtaskDraft}
+                        placeholder="Добавить поддело…"
+                        placeholderTextColor={colors.muted}
+                        style={[styles.addInput, { flex: 1, backgroundColor: colors.surface, color: colors.text }]}
+                        onSubmitEditing={(e) => {
+                          const v = (e.nativeEvent.text ?? subtaskDraft).trim();
+                          if (!v) return;
+                          addSubtask(editingTask!.id, v);
+                          setSubtaskDraft('');
+                        }}
+                        returnKeyType="done"
+                      />
+                      <Pressable
+                        style={[styles.addBtn, { backgroundColor: colors.accent }]}
+                        onPress={() => {
+                          const v = subtaskDraft.trim();
+                          if (!v) return;
+                          addSubtask(editingTask!.id, v);
+                          setSubtaskDraft('');
+                        }}>
+                        <Text style={{ color: '#fff', fontSize: 18, lineHeight: 18 }}>+</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })()}
               <Text style={{ color: pickerLabelColor, fontSize: 12, marginTop: 4 }}>
                 Выберите день и время ниже, затем нажмите «Напомнить».
               </Text>

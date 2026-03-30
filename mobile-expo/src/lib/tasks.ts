@@ -38,6 +38,7 @@ export function createTask(text: string, order = 0, forDay?: DayStr | null): Tas
     isOverdue: false,
     order,
     reminderAt: null,
+    subtasks: [],
   };
 }
 

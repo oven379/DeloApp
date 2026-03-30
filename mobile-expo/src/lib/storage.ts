@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS: Settings = {
   headerTabsStyle: 'full',
   skipDeleteConfirmUntil: null,
   dailyNotifications: DEFAULT_DAILY,
+  editorFontSize: 15,
 };
 
 export async function getTasks(): Promise<Task[]> {

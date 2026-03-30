@@ -12,6 +12,7 @@ export type Task = {
   originalForDay?: DayStr;
   order?: number;
   reminderAt: number | null;
+  subtasks?: { id: string; text: string; done: boolean }[];
 };
 
 export type DailyNotificationSlot = {
@@ -32,5 +33,6 @@ export type Settings = {
   headerTabsStyle: HeaderTabsStyle;
   skipDeleteConfirmUntil: number | null;
   dailyNotifications: DailyNotificationSlot[];
+  editorFontSize?: number;
 };
 
