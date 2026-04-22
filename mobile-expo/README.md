@@ -12,7 +12,7 @@
 
 | Шаг | Где | Что сделать |
 |-----|-----|--------------|
-| 1 | **Терминал** (Cursor или PowerShell) | Сначала перейти в папку проекта: `cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo` (без этого все команды ниже выдадут ошибку «package.json не найден»). |
+| 1 | **Терминал** (Cursor или PowerShell) | Из корня клона DeloApp перейти в приложение: `cd mobile-expo` (без этого команды ниже выдадут ошибку «package.json не найден»). |
 | 2 | Тот же терминал | `npm install` (один раз) |
 | 3 | Тот же терминал | `npx expo start` — **оставить окно открытым** (это Metro) |
 | 4 | **Android Studio** | **File → Open** → папка **`mobile-expo/android`** (не DeloApp) |
@@ -50,7 +50,7 @@
 2. Если код подтягиваете из Git — выполните в папке проекта `git pull` (или синхронизируйте репозиторий как обычно).
 3. Откройте **терминал** и **обязательно** перейдите в папку проекта:
    ```bash
-   cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+   cd mobile-expo
    ```
    Проверьте, что в приглашении терминала виден путь с `mobile-expo` (например `PS ...\DeloApp\mobile-expo>`). Только после этого выполняйте следующие команды.
    (Если проект у вас в другом месте — укажите свой путь.)
@@ -92,7 +92,7 @@ npm run android
 
 1. **Откройте терминал** и перейдите в папку проекта:
    ```bash
-   cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+   cd mobile-expo
    ```
 
 2. **Установите зависимости** (один раз):
@@ -125,7 +125,7 @@ Metro — это сервер, который отдаёт JavaScript прило
 1. Откройте **терминал** (Cursor или PowerShell).
 2. Перейдите в папку проекта:
    ```bash
-   cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+   cd mobile-expo
    ```
 3. Запустите Metro:
    ```bash
@@ -196,7 +196,7 @@ Metro — это сервер, который отдаёт JavaScript прило
 - Если запускаете из **Android Studio:** откройте папку **`mobile-expo/android`** → **Run** (▶). **Не нажимайте Debug** (жук).
 - Если запускаете из терминала:
   ```bash
-  cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+  cd mobile-expo
   npm run android
   ```
   (Metro при этом может быть уже запущен в другом окне — так и должно быть.)
@@ -307,7 +307,7 @@ Metro — это сервер, который отдаёт JavaScript прило
 ### Где возможны неясности или расхождения
 
 1. **Путь к проекту в README**  
-   В инструкциях везде указан каталог `C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo`. На другом компьютере или при переносе репозитория путь будет другим — везде нужно подставлять свой каталог (или перейти в него вручную). Относительные шаги («откройте папку `mobile-expo/android`») имеют в виду: из корня репозитория DeloApp открыть подпапку `mobile-expo/android`.
+   Команды с `cd mobile-expo` выполняйте из **корня клона репозитория DeloApp** (рядом с папкой `mobile-expo`). На другом компьютере путь к клону будет своим — сначала перейдите в корень проекта, затем в `mobile-expo`. Шаги вида «откройте папку `mobile-expo/android`» означают подпапку внутри вашего клона.
 
 2. **Путь к JDK в Gradle**  
    В **`android/gradle.properties`** задано:  
@@ -365,7 +365,7 @@ npm run android
 
 3. **Запустить Metro** в терминале (в Cursor или **View → Tool Windows → Terminal** в Android Studio):
    ```bash
-   cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+   cd mobile-expo
    npx expo start
    ```
 
@@ -397,7 +397,7 @@ npx expo start
 
 1. В терминале перейдите в папку проекта:
    ```bash
-   cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+   cd mobile-expo
    ```
 
 2. Пересоберите папку `android` и установите приложение заново:
@@ -417,14 +417,14 @@ npx expo start
 
 1. **Терминал 1** — Metro:
    ```bash
-   cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+   cd mobile-expo
    npm install
    npx expo start
    ```
 
 2. **Терминал 2** — при необходимости обновить нативную часть (иконка, app.json):
    ```bash
-   cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+   cd mobile-expo
    npx expo prebuild --platform android --clean
    npm run android
    ```
@@ -439,7 +439,7 @@ npx expo start
 **Рекомендуемый способ** — запускать сборку скриптом, который сам выставляет NODE_ENV:
 
 ```bash
-cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+cd mobile-expo
 npm run android
 ```
 
@@ -447,13 +447,13 @@ npm run android
 
 - **PowerShell:**
   ```powershell
-  cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+  cd mobile-expo
   $env:NODE_ENV = "development"
   npx expo run:android
   ```
 - **CMD:**
   ```cmd
-  cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+  cd mobile-expo
   set NODE_ENV=development
   npx expo run:android
   ```
@@ -461,7 +461,7 @@ npm run android
 Если нужно запустить только Gradle (без Metro) из папки `android`, задайте NODE_ENV перед вызовом:
 
 ```powershell
-cd C:\Users\PC\Desktop\projects\cursor\DeloApp\mobile-expo
+cd mobile-expo
 $env:NODE_ENV = "development"
 cd android
 .\gradlew.bat app:assembleDebug -x lint -x test
