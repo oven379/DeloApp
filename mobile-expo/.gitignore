@@ -41,3 +41,6 @@ app-example
 # generated native folders
 /ios
 /android
+
+# локальные артефакты для Play (AAB не коммитим)
+/play-store/

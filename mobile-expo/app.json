@@ -42,6 +42,7 @@
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "./plugins/withPickFirstLibworklets.js",
       "./plugins/withAndroidExported.js",
       "expo-router",
       "expo-notifications",
