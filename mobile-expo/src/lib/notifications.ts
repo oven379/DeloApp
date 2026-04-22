@@ -15,6 +15,8 @@ const TAG_TASK = 'task_reminder';
 
 let taskSyncChain: Promise<void> = Promise.resolve();
 
+const TriggerTypes = Notifications.SchedulableTriggerInputTypes;
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -94,10 +96,12 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
           ...(Platform.OS === 'android' ? { android: { channelId: CHANNEL_ID } } : null),
         },
         // Only 09:00
-        trigger:
-          Platform.OS === 'android'
-            ? ({ hour: 9, minute: 0, repeats: true, channelId: CHANNEL_ID } as any)
-            : ({ hour: 9, minute: 0, repeats: true } as any),
+        trigger: {
+          type: TriggerTypes.DAILY,
+          hour: 9,
+          minute: 0,
+          ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null),
+        } as any,
       })
     );
   }
@@ -112,10 +116,12 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
           ...(Platform.OS === 'android' ? { android: { channelId: CHANNEL_ID } } : null),
         },
         // Only 21:00
-        trigger:
-          Platform.OS === 'android'
-            ? ({ hour: 21, minute: 0, repeats: true, channelId: CHANNEL_ID } as any)
-            : ({ hour: 21, minute: 0, repeats: true } as any),
+        trigger: {
+          type: TriggerTypes.DAILY,
+          hour: 21,
+          minute: 0,
+          ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null),
+        } as any,
       })
     );
   }
@@ -162,11 +168,11 @@ export async function syncTaskReminders(tasks: Task[]) {
           const taskSummary = (t.text || 'Без названия').trim().slice(0, 80);
           const body = taskSummary ? `Напоминание: ${taskSummary}` : 'Напоминание о деле';
           try {
-            // Android is more reliable with timestamp-based trigger (ms) rather than Date object in some environments/emulators.
-            const trigger =
-              Platform.OS === 'android'
-                ? ({ timestamp: Math.floor((t.reminderAt ?? 0) / 1000), channelId: CHANNEL_ID } as any)
-                : (new Date(t.reminderAt!) as any);
+            const trigger = {
+              type: TriggerTypes.DATE,
+              date: new Date(t.reminderAt!),
+              ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null),
+            } as any;
             await Notifications.scheduleNotificationAsync({
               content: {
                 title: APP_TITLE,

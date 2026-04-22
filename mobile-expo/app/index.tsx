@@ -18,7 +18,12 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
+import DraggableFlatList, {
+  NestableDraggableFlatList,
+  NestableScrollContainer,
+  RenderItemParams,
+  ScaleDecorator,
+} from 'react-native-draggable-flatlist';
 import { CalendarList } from 'react-native-calendars';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
@@ -191,31 +196,6 @@ export default function DeloScreen() {
     return `${day}.${month}.${year} · ${h}:${m}`;
   }
 
-  function formatCreatedOrUpdated(t: Task) {
-    const ts = t.updatedAt || t.createdAt;
-    const prefix = t.updatedAt ? 'Изменено' : 'Создано';
-    return `${prefix}: ${formatTaskDateTime(ts)}`;
-  }
-
-  function formatReminderLabel(reminderAt: number) {
-    const d = new Date(reminderAt);
-    const h = String(d.getHours()).padStart(2, '0');
-    const m = String(d.getMinutes()).padStart(2, '0');
-    const timeStr = `${h}:${m}`;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const reminderDay = new Date(d);
-    reminderDay.setHours(0, 0, 0, 0);
-    if (reminderDay.getTime() === today.getTime() || reminderDay.getTime() === tomorrow.getTime()) {
-      return `Напоминание в ${timeStr}`;
-    }
-    const day = d.getDate();
-    const month = d.toLocaleDateString('ru-RU', { month: 'short' });
-    return `Напоминание ${day} ${month} в ${timeStr}`;
-  }
-
   const handleNotificationOpen = (response: Notifications.NotificationResponse | null | undefined) => {
     if (!response) return;
     const requestId = response.notification.request.identifier;
@@ -292,6 +272,26 @@ export default function DeloScreen() {
   const checkBgColor = resolvedTheme === 'light' ? '#eef2f7' : '#142133';
   const pickerLabelColor = resolvedTheme === 'dark' ? '#cbd5e1' : colors.muted;
   const dateTimePickerTextColor = resolvedTheme === 'dark' ? '#e5e7eb' : '#111827';
+
+  function renderTaskDatesMeta(item: Task) {
+    const reminderLineColor =
+      item.reminderAt == null
+        ? colors.muted
+        : item.completedAt
+          ? colors.muted
+          : item.reminderAt <= Date.now()
+            ? colors.overdue
+            : colors.accent;
+
+    return (
+      <View style={{ alignSelf: 'stretch', gap: 2 }}>
+        <Text style={[styles.taskMeta, { color: colors.muted }]}>Создано: {formatTaskDateTime(item.createdAt)}</Text>
+        {item.reminderAt != null ? (
+          <Text style={[styles.taskMeta, { color: reminderLineColor }]}>Напоминание: {formatTaskDateTime(item.reminderAt)}</Text>
+        ) : null}
+      </View>
+    );
+  }
 
   useEffect(() => {
     if (!settings) return;
@@ -528,12 +528,25 @@ export default function DeloScreen() {
   };
 
   const TaskRow = ({ item, drag, isActive }: RenderItemParams<Task>) => {
-    const swipeRef = useRef<Swipeable>(null);
     return (
       <Swipeable
-        ref={swipeRef}
+        overshootLeft={false}
         overshootRight={false}
+        leftThreshold={56}
         rightThreshold={48}
+        renderLeftActions={() => (
+          <View
+            style={{
+              justifyContent: 'center',
+              alignItems: 'flex-start',
+              backgroundColor: colors.overdue,
+              borderRadius: 14,
+              marginVertical: 6,
+              paddingHorizontal: 18,
+            }}>
+            <Text style={{ color: '#fff', fontWeight: '700' }}>Удалить</Text>
+          </View>
+        )}
         renderRightActions={() => (
           <View
             style={{
@@ -547,9 +560,13 @@ export default function DeloScreen() {
             <Text style={{ color: '#fff', fontWeight: '700' }}>Готово ✓</Text>
           </View>
         )}
-        onSwipeableOpen={() => {
-          swipeRef.current?.close();
-          toggleTask(item.id);
+        onSwipeableOpen={(direction, swipeable) => {
+          swipeable.close();
+          if (direction === 'right') {
+            toggleTask(item.id);
+          } else if (direction === 'left') {
+            deleteTask(item.id);
+          }
         }}>
         <Pressable
           onLongPress={drag}
@@ -578,7 +595,7 @@ export default function DeloScreen() {
                 styles.taskText,
                 { color: colors.text, textDecorationLine: item.completedAt ? 'line-through' : 'none' },
               ]}
-              numberOfLines={listMode === 'compact' ? 2 : 5}>
+              numberOfLines={listMode === 'compact' ? 5 : 8}>
               {parseLinksAndPhones(item.text).map((seg, i) =>
                 seg.type === 'text' ? (
                   <Text key={i} style={{ color: colors.text, textDecorationLine: item.completedAt ? 'line-through' : 'none' }}>
@@ -614,44 +631,29 @@ export default function DeloScreen() {
                 )
               )}
             </Text>
-            {(listMode === 'expanded' || item.reminderAt) && (
-              <Text
-                style={[
-                  styles.taskMeta,
-                  {
-                    color: item.reminderAt ? (item.reminderAt > Date.now() ? colors.accent : colors.muted) : colors.muted,
-                  },
-                ]}>
-                {item.reminderAt ? formatReminderLabel(item.reminderAt) : formatCreatedOrUpdated(item)}
-              </Text>
-            )}
+            {renderTaskDatesMeta(item)}
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <Pressable onLongPress={drag} delayLongPress={120} style={styles.smallBtn} hitSlop={8}>
-              <Text style={{ color: colors.muted, fontSize: 13 }}>⋮⋮</Text>
-            </Pressable>
-            <Pressable
-              onPress={(e) => {
-                e?.stopPropagation?.();
-                setEditingTaskId(item.id);
-              }}
-              style={styles.smallBtn}
-              hitSlop={8}>
-              <Text style={{ color: item.reminderAt && item.reminderAt > Date.now() ? colors.accent : colors.muted, fontSize: 14 }}>🕐</Text>
-            </Pressable>
+          <View style={styles.taskRowActions}>
             {dayView === 'today' && currentDayStr === todayStr() && (
-              <Pressable onPress={() => handlePostponePress(item)} style={[styles.smallBtn, { backgroundColor: colors.surface2 }]}>
-                <Text style={{ color: colors.text, fontSize: 12 }}>Завтра</Text>
+              <Pressable
+                onPress={(e) => {
+                  e?.stopPropagation?.();
+                  handlePostponePress(item);
+                }}
+                style={[styles.tomorrowChip, { backgroundColor: colors.surface2 }]}>
+                <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>Завтра</Text>
               </Pressable>
             )}
             {(dayView === 'tomorrow' || currentDayStr === tomorrowStr()) && isTodayStillGoing && (
-              <Pressable onPress={() => moveToToday(item.id)} style={[styles.smallBtn, { backgroundColor: colors.surface2 }]}>
-                <Text style={{ color: colors.text, fontSize: 12 }}>Сегодня</Text>
+              <Pressable
+                onPress={(e) => {
+                  e?.stopPropagation?.();
+                  moveToToday(item.id);
+                }}
+                style={[styles.tomorrowChip, { backgroundColor: colors.surface2 }]}>
+                <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>Сегодня</Text>
               </Pressable>
             )}
-            <Pressable onPress={() => deleteTask(item.id)} style={styles.smallBtn}>
-              <Text style={{ color: colors.muted }}>🗑️</Text>
-            </Pressable>
           </View>
         </Pressable>
       </Swipeable>
@@ -701,6 +703,12 @@ export default function DeloScreen() {
         const next = list.filter((st) => st.id !== subtaskId);
         return { ...t, subtasks: next, updatedAt: Date.now() };
       })
+    );
+  };
+
+  const reorderSubtasks = (taskId: string, nextOrder: NonNullable<Task['subtasks']>) => {
+    setTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, subtasks: nextOrder, updatedAt: Date.now() } : t))
     );
   };
 
@@ -949,62 +957,87 @@ export default function DeloScreen() {
                 <View style={styles.doneWrap}>
                   <Text style={[styles.doneTitle, { color: colors.muted }]}>Готово</Text>
                   {completed.map((t) => (
-                    <View
+                    <Swipeable
                       key={t.id}
-                      style={[
-                        styles.taskRow,
-                        listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
-                        { backgroundColor: colors.surface, borderColor: colors.border, opacity: 0.75 },
-                      ]}>
+                      overshootLeft={false}
+                      leftThreshold={56}
+                      renderLeftActions={() => (
+                        <View
+                          style={{
+                            justifyContent: 'center',
+                            alignItems: 'flex-start',
+                            backgroundColor: colors.overdue,
+                            borderRadius: 14,
+                            marginVertical: 6,
+                            paddingHorizontal: 18,
+                          }}>
+                          <Text style={{ color: '#fff', fontWeight: '700' }}>Удалить</Text>
+                        </View>
+                      )}
+                      onSwipeableOpen={(direction, swipeable) => {
+                        swipeable.close();
+                        if (direction === 'left') deleteTask(t.id);
+                      }}>
                       <Pressable
-                        onPress={() => toggleTask(t.id)}
+                        onPress={() => setEditingTaskId(t.id)}
                         style={[
-                          styles.check,
-                          listMode === 'compact' ? styles.checkCompact : styles.checkExpanded,
-                          { borderColor: checkBorderColor, backgroundColor: checkBgColor },
+                          styles.taskRow,
+                          listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
+                          { backgroundColor: colors.surface, borderColor: colors.border, opacity: 0.75 },
                         ]}>
-                        <Text style={{ color: colors.text }}>✓</Text>
+                        <Pressable
+                          onPress={(e) => {
+                            e?.stopPropagation?.();
+                            toggleTask(t.id);
+                          }}
+                          style={[
+                            styles.check,
+                            listMode === 'compact' ? styles.checkCompact : styles.checkExpanded,
+                            { borderColor: checkBorderColor, backgroundColor: checkBgColor },
+                          ]}>
+                          <Text style={{ color: colors.text }}>✓</Text>
+                        </Pressable>
+                        <View style={styles.taskTextCol}>
+                          <Text
+                            style={[styles.taskText, { color: colors.text, textDecorationLine: 'line-through' }]}
+                            numberOfLines={listMode === 'compact' ? 5 : 8}>
+                            {parseLinksAndPhones(t.text).map((seg, i) =>
+                              seg.type === 'text' ? (
+                                <Text key={i} style={{ color: colors.text, textDecorationLine: 'line-through' }}>{seg.value}</Text>
+                              ) : seg.type === 'link' ? (
+                                <Text
+                                  key={i}
+                                  style={{ color: colors.link, textDecorationLine: 'underline' }}
+                                  onPress={() => {
+                                    const url = seg.url.startsWith('http') ? seg.url : `https://${seg.url}`;
+                                    Linking.openURL(url).catch(() => {});
+                                  }}>
+                                  {seg.label}
+                                </Text>
+                              ) : seg.type === 'url' ? (
+                                <Text
+                                  key={i}
+                                  style={{ color: colors.link, textDecorationLine: 'underline' }}
+                                  onPress={() => {
+                                    const url = seg.value.startsWith('http') ? seg.value : `https://${seg.value}`;
+                                    Linking.openURL(url).catch(() => {});
+                                  }}>
+                                  {seg.value}
+                                </Text>
+                              ) : (
+                                <Text
+                                  key={i}
+                                  style={{ color: colors.link, textDecorationLine: 'underline' }}
+                                  onPress={() => Linking.openURL(`tel:${seg.value.replace(/\D/g, '')}`).catch(() => {})}>
+                                  {seg.value}
+                                </Text>
+                              )
+                            )}
+                          </Text>
+                          {renderTaskDatesMeta(t)}
+                        </View>
                       </Pressable>
-                      <Text
-                        style={[styles.taskText, { color: colors.text, textDecorationLine: 'line-through', flex: 1 }]}
-                        numberOfLines={listMode === 'compact' ? 1 : 3}>
-                        {parseLinksAndPhones(t.text).map((seg, i) =>
-                          seg.type === 'text' ? (
-                            <Text key={i} style={{ color: colors.text, textDecorationLine: 'line-through' }}>{seg.value}</Text>
-                          ) : seg.type === 'link' ? (
-                            <Text
-                              key={i}
-                              style={{ color: colors.link, textDecorationLine: 'underline' }}
-                              onPress={() => {
-                                const url = seg.url.startsWith('http') ? seg.url : `https://${seg.url}`;
-                                Linking.openURL(url).catch(() => {});
-                              }}>
-                              {seg.label}
-                            </Text>
-                          ) : seg.type === 'url' ? (
-                            <Text
-                              key={i}
-                              style={{ color: colors.link, textDecorationLine: 'underline' }}
-                              onPress={() => {
-                                const url = seg.value.startsWith('http') ? seg.value : `https://${seg.value}`;
-                                Linking.openURL(url).catch(() => {});
-                              }}>
-                              {seg.value}
-                            </Text>
-                          ) : (
-                            <Text
-                              key={i}
-                              style={{ color: colors.link, textDecorationLine: 'underline' }}
-                              onPress={() => Linking.openURL(`tel:${seg.value.replace(/\D/g, '')}`).catch(() => {})}>
-                              {seg.value}
-                            </Text>
-                          )
-                        )}
-                      </Text>
-                      <Pressable onPress={() => deleteTask(t.id)} style={styles.smallBtn}>
-                        <Text style={{ color: colors.muted }}>🗑️</Text>
-                      </Pressable>
-                    </View>
+                    </Swipeable>
                   ))}
                 </View>
               ) : null
@@ -1361,7 +1394,7 @@ export default function DeloScreen() {
                   <Text style={{ color: colors.muted, fontSize: 18 }}>✕</Text>
                 </Pressable>
               </View>
-              <ScrollView
+              <NestableScrollContainer
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={{ paddingBottom: 24 + keyboardHeight }}
                 showsVerticalScrollIndicator={false}>
@@ -1412,45 +1445,80 @@ export default function DeloScreen() {
               <Text style={[styles.sectionTitle, { color: colors.muted }]}>ПОДДЕЛА</Text>
               {(() => {
                 const list = editingTask?.subtasks ?? [];
+                const taskId = editingTask?.id;
                 return (
                   <View style={{ gap: 8 }}>
                     {list.length === 0 ? (
                       <Text style={{ color: colors.muted }}>Пока нет поддел.</Text>
-                    ) : (
-                      list.map((st) => (
-                        <View
-                          key={st.id}
-                          style={[
-                            styles.slotRow,
-                            {
-                              borderColor: colors.border,
-                              backgroundColor: colors.surface,
-                              flexDirection: 'row',
-                              alignItems: 'center',
-                              gap: 10,
-                              opacity: st.done ? 0.72 : 1,
-                            },
-                          ]}>
-                          <Pressable onPress={() => toggleSubtask(editingTask!.id, st.id)}>
-                            <Text style={{ color: st.done ? colors.accent : colors.text, fontSize: 18 }}>
-                              {st.done ? '☑' : '☐'}
-                            </Text>
-                          </Pressable>
-                          <Text
-                            style={{
-                              color: st.done ? colors.muted : colors.text,
-                              flex: 1,
-                              textDecorationLine: st.done ? 'line-through' : 'none',
-                            }}
-                            numberOfLines={2}>
-                            {st.text}
-                          </Text>
-                          <Pressable onPress={() => deleteSubtask(editingTask!.id, st.id)} hitSlop={10}>
-                            <Text style={{ color: colors.muted }}>🗑️</Text>
-                          </Pressable>
-                        </View>
-                      ))
-                    )}
+                    ) : taskId ? (
+                      <NestableDraggableFlatList
+                        data={list}
+                        keyExtractor={(st) => st.id}
+                        activationDistance={12}
+                        containerStyle={{ minHeight: Math.max(56, list.length * 56) }}
+                        onDragEnd={({ data }) => reorderSubtasks(taskId, data)}
+                        renderItem={({ item: st, drag, isActive }: RenderItemParams<(typeof list)[number]>) => (
+                          <ScaleDecorator>
+                            <View
+                              style={[
+                                styles.slotRow,
+                                {
+                                  borderColor: colors.border,
+                                  backgroundColor: colors.surface,
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  opacity: st.done ? 0.72 : isActive ? 0.85 : 1,
+                                },
+                              ]}>
+                              <Pressable
+                                onPress={() => toggleSubtask(taskId, st.id)}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                style={{
+                                  width: 44,
+                                  height: 44,
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                                accessibilityRole="checkbox"
+                                accessibilityState={{ checked: st.done }}
+                                accessibilityLabel={st.done ? 'Отметить невыполненным' : 'Отметить выполненным'}>
+                                <Text
+                                  style={{
+                                    color: st.done ? colors.accent : colors.text,
+                                    fontSize: 28,
+                                    lineHeight: 30,
+                                  }}>
+                                  {st.done ? '☑' : '☐'}
+                                </Text>
+                              </Pressable>
+                              <Text
+                                style={{
+                                  color: st.done ? colors.muted : colors.text,
+                                  flex: 1,
+                                  textDecorationLine: st.done ? 'line-through' : 'none',
+                                  fontSize: 15,
+                                }}
+                                numberOfLines={2}>
+                                {st.text}
+                              </Text>
+                              <Pressable
+                                onLongPress={drag}
+                                delayLongPress={160}
+                                hitSlop={10}
+                                style={{ paddingVertical: 8, paddingHorizontal: 6 }}
+                                accessibilityRole="button"
+                                accessibilityLabel="Перетащить поддело">
+                                <Text style={{ color: colors.muted, fontSize: 16 }}>⋮⋮</Text>
+                              </Pressable>
+                              <Pressable onPress={() => deleteSubtask(taskId, st.id)} hitSlop={10}>
+                                <Text style={{ color: colors.muted }}>🗑️</Text>
+                              </Pressable>
+                            </View>
+                          </ScaleDecorator>
+                        )}
+                      />
+                    ) : null}
 
                     <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
                       <TextInput
@@ -1655,7 +1723,7 @@ export default function DeloScreen() {
                 </View>
               )}
 
-              </ScrollView>
+              </NestableScrollContainer>
             </View>
           </View>
         </Modal>
@@ -1810,9 +1878,11 @@ const styles = StyleSheet.create({
   check: { width: 26, height: 26, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
   checkCompact: { width: 24, height: 24, marginTop: 1 },
   checkExpanded: { width: 28, height: 28, marginTop: 3 },
-  taskTextCol: { flex: 1, gap: 4 },
+  taskTextCol: { flex: 1, gap: 4, minWidth: 0 },
   taskText: { fontSize: 15, lineHeight: 20 },
   taskMeta: { fontSize: 12 },
+  taskRowActions: { flexShrink: 0, alignItems: 'flex-end', justifyContent: 'flex-start', paddingTop: 2, maxWidth: '34%' },
+  tomorrowChip: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, minHeight: 38, justifyContent: 'center' },
   smallBtn: { paddingHorizontal: 8, paddingVertical: 6, borderRadius: 10 },
   empty: { padding: 24, alignItems: 'center', gap: 10 },
   emptyTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center' },

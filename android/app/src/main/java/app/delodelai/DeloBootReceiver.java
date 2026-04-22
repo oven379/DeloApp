@@ -1,4 +1,4 @@
-package com.delo.app;
+package app.delodelai;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -6,10 +6,6 @@ import android.content.Intent;
 import android.os.Build;
 import android.util.Log;
 
-/**
- * Запускает приложение после перезагрузки устройства, чтобы перепланировать напоминания
- * (система сбрасывает отложенные уведомления при выключении).
- */
 public class DeloBootReceiver extends BroadcastReceiver {
 
     private static final String TAG = "DeloBootReceiver";

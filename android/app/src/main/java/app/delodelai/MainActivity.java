@@ -1,7 +1,8 @@
-package com.delo.app;
+package app.delodelai;
 
 import android.content.Intent;
 import android.os.Bundle;
+
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {

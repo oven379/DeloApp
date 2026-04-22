@@ -1,16 +1,13 @@
-package com.delo.app;
+package app.delodelai;
 
 import android.content.Context;
+
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-/**
- * Плагин для определения запуска «только для перепланирования» (после перезагрузки).
- * JS вызывает getLaunchReason() при старте и при reason=reschedule синхронизирует напоминания и закрывает приложение.
- */
 @CapacitorPlugin(name = "DeloBoot")
 public class DeloBootPlugin extends Plugin {
 

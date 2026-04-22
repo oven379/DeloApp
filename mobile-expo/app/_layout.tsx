@@ -1,9 +1,9 @@
-import './_init';
+import '@/src/bootstrap';
 import * as SplashScreen from 'expo-splash-screen';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
-import { Text, View } from 'react-native';
+import { InteractionManager, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -39,14 +39,25 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   useEffect(() => {
-    SplashScreen.hideAsync?.().catch(() => {});
+    // Дождаться первого кадра UI, иначе на Android после splash часто «мигает» чёрный фон / полосы.
+    const task = InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(() => {
+        SplashScreen.hideAsync?.().catch(() => {});
+      });
+    });
+    return () => task.cancel?.();
   }, []);
 
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0b0f14' }}>
       <SafeAreaProvider style={{ flex: 1, backgroundColor: '#0b0f14' }}>
         <RootErrorBoundary>
-          <Stack screenOptions={{ headerShown: false }} />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { flex: 1, backgroundColor: '#0b0f14' },
+            }}
+          />
           <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
         </RootErrorBoundary>
       </SafeAreaProvider>
