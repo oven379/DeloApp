@@ -8,7 +8,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "app.delodelai",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "icon": "./assets/images/icon.png",
