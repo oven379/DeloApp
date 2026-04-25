@@ -1,4 +1,4 @@
-import type { DayStr, Task } from '../types';
+import type { DayStr, Subtask, Task } from '../types';
 
 export function dayStrFromDateLocal(date: Date): DayStr {
   const y = date.getFullYear();
@@ -40,6 +40,59 @@ export function createTask(text: string, order = 0, forDay?: DayStr | null): Tas
     reminderAt: null,
     subtasks: [],
   };
+}
+
+function getSubtasks(task: Task): Subtask[] {
+  return Array.isArray(task.subtasks) ? task.subtasks : [];
+}
+
+export function createSubtask(text: string, now = Date.now()): Subtask {
+  return {
+    id: `st_${now}_${Math.random().toString(36).slice(2, 7)}`,
+    text: text.trim(),
+    done: false,
+  };
+}
+
+export function addSubtaskToTask(task: Task, text: string): Task {
+  const trimmed = text.trim();
+  if (!trimmed) return task;
+  return {
+    ...task,
+    subtasks: [...getSubtasks(task), createSubtask(trimmed)],
+    updatedAt: Date.now(),
+  };
+}
+
+export function updateSubtaskInTask(task: Task, subtaskId: string, text: string): Task {
+  const trimmed = text.trim();
+  if (!trimmed) return task;
+  const list = getSubtasks(task);
+  let changed = false;
+  const subtasks = list.map((subtask) => {
+    if (subtask.id !== subtaskId) return subtask;
+    if (subtask.text.trim() === trimmed) return subtask;
+    changed = true;
+    return { ...subtask, text: trimmed };
+  });
+  return changed ? { ...task, subtasks, updatedAt: Date.now() } : task;
+}
+
+export function toggleSubtaskInTask(task: Task, subtaskId: string): Task {
+  const list = getSubtasks(task);
+  let changed = false;
+  const subtasks = list.map((subtask) => {
+    if (subtask.id !== subtaskId) return subtask;
+    changed = true;
+    return { ...subtask, done: !subtask.done };
+  });
+  return changed ? { ...task, subtasks, updatedAt: Date.now() } : task;
+}
+
+export function deleteSubtaskFromTask(task: Task, subtaskId: string): Task {
+  const list = getSubtasks(task);
+  const subtasks = list.filter((subtask) => subtask.id !== subtaskId);
+  return subtasks.length === list.length ? task : { ...task, subtasks, updatedAt: Date.now() };
 }
 
 /** Переносит невыполненные задачи с прошлых дней на сегодня с пометкой просрочки */

@@ -19,19 +19,30 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import DraggableFlatList, {
-  NestableDraggableFlatList,
   NestableScrollContainer,
   RenderItemParams,
-  ScaleDecorator,
 } from 'react-native-draggable-flatlist';
 import { CalendarList } from 'react-native-calendars';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 
-import type { DayStr, Settings, Task } from '../src/types';
+import type { DayStr, Settings, Subtask, Task } from '../src/types';
 import { DEFAULT_SETTINGS, getSettings, getSkipDeleteConfirmUntil, getTasks, saveSettings, saveTasks } from '../src/lib/storage';
-import { createTask, dayStrFromDateLocal, getCurrentDayStr, getDayStats, getTodayStats, rolloverTasks, todayStr, tomorrowStr } from '../src/lib/tasks';
+import {
+  addSubtaskToTask,
+  createTask,
+  dayStrFromDateLocal,
+  deleteSubtaskFromTask,
+  getCurrentDayStr,
+  getDayStats,
+  getTodayStats,
+  rolloverTasks,
+  todayStr,
+  toggleSubtaskInTask,
+  tomorrowStr,
+  updateSubtaskInTask,
+} from '../src/lib/tasks';
 import { disableOverdueReminders, requestPermissions, syncDailyNotifications, syncTaskReminders } from '../src/lib/notifications';
 
 const WEEKDAY_SHORT = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
@@ -137,6 +148,8 @@ export default function DeloScreen() {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [subtaskDraft, setSubtaskDraft] = useState('');
+  const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
+  const [subtaskEditDraft, setSubtaskEditDraft] = useState('');
   const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
   const [reminderTemp, setReminderTemp] = useState<Date>(new Date());
   const [showPastReminderWarning, setShowPastReminderWarning] = useState(false);
@@ -672,44 +685,33 @@ export default function DeloScreen() {
   };
 
   const addSubtask = (taskId: string, text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id !== taskId) return t;
-        const list = Array.isArray(t.subtasks) ? t.subtasks : [];
-        const next = [...list, { id: `st_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, text: trimmed, done: false }];
-        return { ...t, subtasks: next, updatedAt: Date.now() };
-      })
-    );
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? addSubtaskToTask(t, text) : t)));
+  };
+
+  const startSubtaskEdit = (subtask: Subtask) => {
+    setEditingSubtaskId(subtask.id);
+    setSubtaskEditDraft(subtask.text);
+  };
+
+  const cancelSubtaskEdit = () => {
+    setEditingSubtaskId(null);
+    setSubtaskEditDraft('');
+  };
+
+  const saveSubtaskEdit = (taskId: string, subtaskId: string) => {
+    const nextText = subtaskEditDraft.trim();
+    if (!nextText) return;
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? updateSubtaskInTask(t, subtaskId, nextText) : t)));
+    cancelSubtaskEdit();
   };
 
   const toggleSubtask = (taskId: string, subtaskId: string) => {
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id !== taskId) return t;
-        const list = Array.isArray(t.subtasks) ? t.subtasks : [];
-        const next = list.map((st) => (st.id === subtaskId ? { ...st, done: !st.done } : st));
-        return { ...t, subtasks: next, updatedAt: Date.now() };
-      })
-    );
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? toggleSubtaskInTask(t, subtaskId) : t)));
   };
 
   const deleteSubtask = (taskId: string, subtaskId: string) => {
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id !== taskId) return t;
-        const list = Array.isArray(t.subtasks) ? t.subtasks : [];
-        const next = list.filter((st) => st.id !== subtaskId);
-        return { ...t, subtasks: next, updatedAt: Date.now() };
-      })
-    );
-  };
-
-  const reorderSubtasks = (taskId: string, nextOrder: NonNullable<Task['subtasks']>) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === taskId ? { ...t, subtasks: nextOrder, updatedAt: Date.now() } : t))
-    );
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? deleteSubtaskFromTask(t, subtaskId) : t)));
+    if (editingSubtaskId === subtaskId) cancelSubtaskEdit();
   };
 
   const deleteTask = (id: string) => {
@@ -825,6 +827,7 @@ export default function DeloScreen() {
       }
       setEditDraft(editingTask.text ?? '');
       setSubtaskDraft('');
+      cancelSubtaskEdit();
       const base =
         editingTask.reminderAt && editingTask.reminderAt > Date.now()
           ? new Date(editingTask.reminderAt)
@@ -834,6 +837,7 @@ export default function DeloScreen() {
     } else {
       setEditDraft('');
       setSubtaskDraft('');
+      cancelSubtaskEdit();
       setShowPastReminderWarning(false);
     }
   }, [editingTaskId, editingTask, tasks.length]);
@@ -842,6 +846,7 @@ export default function DeloScreen() {
     if (editingTaskId && editDraft.trim() !== '') {
       updateTask(editingTaskId, editDraft);
     }
+    cancelSubtaskEdit();
     setEditingTaskId(null);
     setReminderPickerOpen(false);
   };
@@ -1451,73 +1456,92 @@ export default function DeloScreen() {
                     {list.length === 0 ? (
                       <Text style={{ color: colors.muted }}>Пока нет поддел.</Text>
                     ) : taskId ? (
-                      <NestableDraggableFlatList
-                        data={list}
-                        keyExtractor={(st) => st.id}
-                        activationDistance={12}
-                        containerStyle={{ minHeight: Math.max(56, list.length * 56) }}
-                        onDragEnd={({ data }) => reorderSubtasks(taskId, data)}
-                        renderItem={({ item: st, drag, isActive }: RenderItemParams<(typeof list)[number]>) => (
-                          <ScaleDecorator>
-                            <View
-                              style={[
-                                styles.slotRow,
-                                {
-                                  borderColor: colors.border,
-                                  backgroundColor: colors.surface,
-                                  flexDirection: 'row',
-                                  alignItems: 'center',
-                                  gap: 8,
-                                  opacity: st.done ? 0.72 : isActive ? 0.85 : 1,
-                                },
-                              ]}>
-                              <Pressable
-                                onPress={() => toggleSubtask(taskId, st.id)}
-                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                                style={{
-                                  width: 44,
-                                  height: 44,
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                }}
-                                accessibilityRole="checkbox"
-                                accessibilityState={{ checked: st.done }}
-                                accessibilityLabel={st.done ? 'Отметить невыполненным' : 'Отметить выполненным'}>
-                                <Text
-                                  style={{
-                                    color: st.done ? colors.accent : colors.text,
-                                    fontSize: 28,
-                                    lineHeight: 30,
-                                  }}>
-                                  {st.done ? '☑' : '☐'}
-                                </Text>
-                              </Pressable>
+                      list.map((st) => {
+                        const isEditing = editingSubtaskId === st.id;
+                        return (
+                          <View
+                            key={st.id}
+                            style={[
+                              styles.slotRow,
+                              {
+                                borderColor: colors.border,
+                                backgroundColor: colors.surface,
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                gap: 8,
+                                opacity: st.done && !isEditing ? 0.72 : 1,
+                              },
+                            ]}>
+                            <Pressable
+                              onPress={() => toggleSubtask(taskId, st.id)}
+                              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                              style={{
+                                width: 44,
+                                height: 44,
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
+                              accessibilityRole="checkbox"
+                              accessibilityState={{ checked: st.done }}
+                              accessibilityLabel={st.done ? 'Отметить невыполненным' : 'Отметить выполненным'}>
                               <Text
                                 style={{
-                                  color: st.done ? colors.muted : colors.text,
-                                  flex: 1,
-                                  textDecorationLine: st.done ? 'line-through' : 'none',
-                                  fontSize: 15,
-                                }}
-                                numberOfLines={2}>
-                                {st.text}
+                                  color: st.done ? colors.accent : colors.text,
+                                  fontSize: 28,
+                                  lineHeight: 30,
+                                }}>
+                                {st.done ? '☑' : '☐'}
                               </Text>
+                            </Pressable>
+                            {isEditing ? (
+                              <TextInput
+                                value={subtaskEditDraft}
+                                onChangeText={setSubtaskEditDraft}
+                                autoFocus
+                                multiline
+                                style={[styles.addInput, { flex: 1, backgroundColor: colors.bg, color: colors.text, minHeight: 44 }]}
+                                returnKeyType="done"
+                                onSubmitEditing={() => saveSubtaskEdit(taskId, st.id)}
+                              />
+                            ) : (
                               <Pressable
-                                onLongPress={drag}
-                                delayLongPress={160}
-                                hitSlop={10}
-                                style={{ paddingVertical: 8, paddingHorizontal: 6 }}
+                                onPress={() => startSubtaskEdit(st)}
+                                style={{ flex: 1, minHeight: 44, justifyContent: 'center' }}
                                 accessibilityRole="button"
-                                accessibilityLabel="Перетащить поддело">
-                                <Text style={{ color: colors.muted, fontSize: 16 }}>⋮⋮</Text>
+                                accessibilityLabel="Редактировать поддело">
+                                <Text
+                                  style={{
+                                    color: st.done ? colors.muted : colors.text,
+                                    textDecorationLine: st.done ? 'line-through' : 'none',
+                                    fontSize: 15,
+                                  }}
+                                  numberOfLines={2}>
+                                  {st.text}
+                                </Text>
                               </Pressable>
-                              <Pressable onPress={() => deleteSubtask(taskId, st.id)} hitSlop={10}>
-                                <Text style={{ color: colors.muted }}>🗑️</Text>
-                              </Pressable>
-                            </View>
-                          </ScaleDecorator>
-                        )}
-                      />
+                            )}
+                            {isEditing ? (
+                              <>
+                                <Pressable onPress={() => saveSubtaskEdit(taskId, st.id)} hitSlop={10}>
+                                  <Text style={{ color: colors.accent, fontSize: 18 }}>✓</Text>
+                                </Pressable>
+                                <Pressable onPress={cancelSubtaskEdit} hitSlop={10}>
+                                  <Text style={{ color: colors.muted, fontSize: 18 }}>×</Text>
+                                </Pressable>
+                              </>
+                            ) : (
+                              <>
+                                <Pressable onPress={() => startSubtaskEdit(st)} hitSlop={10}>
+                                  <Text style={{ color: colors.muted }}>✎</Text>
+                                </Pressable>
+                                <Pressable onPress={() => deleteSubtask(taskId, st.id)} hitSlop={10}>
+                                  <Text style={{ color: colors.muted }}>🗑️</Text>
+                                </Pressable>
+                              </>
+                            )}
+                          </View>
+                        );
+                      })
                     ) : null}
 
                     <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>

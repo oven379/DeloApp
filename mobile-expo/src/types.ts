@@ -1,5 +1,11 @@
 export type DayStr = `${number}-${number}-${number}`; // YYYY-MM-DD
 
+export type Subtask = {
+  id: string;
+  text: string;
+  done: boolean;
+};
+
 export type Task = {
   id: string;
   text: string;
@@ -12,7 +18,7 @@ export type Task = {
   originalForDay?: DayStr;
   order?: number;
   reminderAt: number | null;
-  subtasks?: { id: string; text: string; done: boolean }[];
+  subtasks?: Subtask[];
 };
 
 export type DailyNotificationSlot = {
