@@ -1,11 +1,18 @@
 export function todayStr() {
-  return new Date().toISOString().slice(0, 10)
+  return dayStrFromDateLocal(new Date())
 }
 
 export function tomorrowStr() {
   const d = new Date()
   d.setDate(d.getDate() + 1)
-  return d.toISOString().slice(0, 10)
+  return dayStrFromDateLocal(d)
+}
+
+export function dayStrFromDateLocal(date) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
 /** Текущая выбранная дата: 'today' | 'tomorrow' | YYYY-MM-DD → строка даты */
