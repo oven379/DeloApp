@@ -2,20 +2,25 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import type { DailyNotificationSlot, Task } from '../types';
+import { planDailyNotifications, planTaskReminders } from './notificationPlanning';
 
 const APP_TITLE = 'Дело';
-const CHANNEL_ID = 'delo-reminders';
+const CHANNEL_ID = 'delo-reminders-v2';
+const NOTIFICATION_SOUND = 'reminder.wav';
 
-const TAG_DAILY_MORNING = 'daily_morning';
-const TAG_DAILY_EVENING = 'daily_evening';
 const TAG_OVERDUE = 'overdue_2121';
 const TAG_TASK = 'task_reminder';
 
 // Overdue reminders were removed: keep TAG_OVERDUE only to cancel old scheduled notifications.
 
 let taskSyncChain: Promise<void> = Promise.resolve();
+let dailySyncChain: Promise<void> = Promise.resolve();
 
 const TriggerTypes = Notifications.SchedulableTriggerInputTypes;
+
+function isNativeNotificationsAvailable() {
+  return Platform.OS === 'android' || Platform.OS === 'ios';
+}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -33,11 +38,12 @@ async function ensureAndroidChannel() {
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#4caf50',
-    sound: 'default',
+    sound: NOTIFICATION_SOUND,
   });
 }
 
 export async function requestPermissions() {
+  if (!isNativeNotificationsAvailable()) return null;
   await ensureAndroidChannel();
   const current = await Notifications.getPermissionsAsync();
   if (current.granted || current.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
@@ -48,6 +54,7 @@ export async function requestPermissions() {
 }
 
 async function hasNotificationPermission() {
+  if (!isNativeNotificationsAvailable()) return false;
   const p = await Notifications.getPermissionsAsync();
   return !!(p.granted || p.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL);
 }
@@ -55,6 +62,7 @@ async function hasNotificationPermission() {
 // (debug helpers removed from UI)
 
 async function cancelByTag(tag: string) {
+  if (!isNativeNotificationsAvailable()) return;
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   const toCancel = scheduled
     .filter((n) => {
@@ -65,7 +73,15 @@ async function cancelByTag(tag: string) {
   for (const id of toCancel) await Notifications.cancelScheduledNotificationAsync(id);
 }
 
+async function cancelByIdentifier(identifier: string) {
+  if (!isNativeNotificationsAvailable()) return;
+  try {
+    await Notifications.cancelScheduledNotificationAsync(identifier);
+  } catch {}
+}
+
 async function cancelTaskById(taskId: string) {
+  if (!isNativeNotificationsAvailable()) return;
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   const toCancel = scheduled
     .filter((n) => (n.content?.data as any)?.tag === TAG_TASK && (n.content?.data as any)?.taskId === taskId)
@@ -74,66 +90,54 @@ async function cancelTaskById(taskId: string) {
 }
 
 export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
-  await ensureAndroidChannel();
-  if (!(await hasNotificationPermission())) {
-    console.warn('[notifications] permission denied: skip daily notifications');
-    return;
-  }
-  await cancelByTag(TAG_DAILY_MORNING);
-  await cancelByTag(TAG_DAILY_EVENING);
+  if (!isNativeNotificationsAvailable()) return;
+  dailySyncChain = dailySyncChain
+    .catch(() => {})
+    .then(async () => {
+      await ensureAndroidChannel();
+      if (!(await hasNotificationPermission())) {
+        console.warn('[notifications] permission denied: skip daily notifications');
+        return;
+      }
+      await Promise.all([
+        cancelByIdentifier('delo_daily_morning'),
+        cancelByIdentifier('delo_daily_evening'),
+        cancelByTag('daily_morning'),
+        cancelByTag('daily_evening'),
+      ]);
 
-  const list = slots || [];
-  const toSchedule: Promise<string>[] = [];
+      const plans = planDailyNotifications(slots);
+      const toSchedule = plans.map((plan) =>
+        Notifications.scheduleNotificationAsync({
+          identifier: plan.identifier,
+          content: {
+            title: APP_TITLE,
+            body: plan.body,
+            data: { tag: plan.tag },
+            sound: NOTIFICATION_SOUND,
+            ...(Platform.OS === 'android' ? { android: { channelId: CHANNEL_ID } } : null),
+          },
+          trigger: {
+            type: TriggerTypes.DAILY,
+            hour: plan.hour,
+            minute: plan.minute,
+            ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null),
+          } as any,
+        })
+      );
 
-  if (list[0]?.enabled) {
-    toSchedule.push(
-      Notifications.scheduleNotificationAsync({
-        content: {
-          title: APP_TITLE,
-          body: list[0].text || 'Проверь свои планы на сегодня.',
-          data: { tag: TAG_DAILY_MORNING },
-          sound: 'default',
-          ...(Platform.OS === 'android' ? { android: { channelId: CHANNEL_ID } } : null),
-        },
-        // Only 09:00
-        trigger: {
-          type: TriggerTypes.DAILY,
-          hour: 9,
-          minute: 0,
-          ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null),
-        } as any,
-      })
-    );
-  }
-  if (list[1]?.enabled) {
-    toSchedule.push(
-      Notifications.scheduleNotificationAsync({
-        content: {
-          title: APP_TITLE,
-          body: list[1].text || 'Проверь свои дела на завтра.',
-          data: { tag: TAG_DAILY_EVENING },
-          sound: 'default',
-          ...(Platform.OS === 'android' ? { android: { channelId: CHANNEL_ID } } : null),
-        },
-        // Only 21:00
-        trigger: {
-          type: TriggerTypes.DAILY,
-          hour: 21,
-          minute: 0,
-          ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null),
-        } as any,
-      })
-    );
-  }
+      try {
+        await Promise.all(toSchedule);
+      } catch (e) {
+        console.warn('[notifications] syncDailyNotifications failed', e);
+      }
+    });
 
-  try {
-    await Promise.all(toSchedule);
-  } catch (e) {
-    console.warn('[notifications] syncDailyNotifications failed', e);
-  }
+  await dailySyncChain;
 }
 
 export async function syncTaskReminders(tasks: Task[]) {
+  if (!isNativeNotificationsAvailable()) return;
   // Serialize sync calls to prevent race conditions that can create duplicate scheduled notifications.
   // Example race: two syncTaskReminders() calls run concurrently → both cancel (nothing yet) → both schedule → duplicates.
   taskSyncChain = taskSyncChain
@@ -144,10 +148,10 @@ export async function syncTaskReminders(tasks: Task[]) {
         console.warn('[notifications] permission denied: skip task reminders');
         return;
       }
-      const now = Date.now();
       const list = tasks || [];
-      const withReminder = list.filter((t) => t.reminderAt && t.reminderAt > now);
-      const withoutReminder = list.filter((t) => !t.reminderAt || (t.reminderAt ?? 0) <= now);
+      const plans = planTaskReminders(list);
+      const planByTaskId = new Map(plans.map((plan) => [plan.taskId, plan]));
+      const withoutReminder = list.filter((t) => !planByTaskId.has(t.id));
 
       await Promise.all(
         withoutReminder.map(async (t) => {
@@ -159,32 +163,31 @@ export async function syncTaskReminders(tasks: Task[]) {
         })
       );
       await Promise.all(
-        withReminder.map(async (t) => {
+        plans.map(async (plan) => {
           try {
-            await cancelTaskById(t.id);
+            await cancelTaskById(plan.taskId);
           } catch (e) {
-            console.warn('[notifications] cancelTaskById before schedule failed', { taskId: t.id, e });
+            console.warn('[notifications] cancelTaskById before schedule failed', { taskId: plan.taskId, e });
           }
-          const taskSummary = (t.text || 'Без названия').trim().slice(0, 80);
-          const body = taskSummary ? `Напоминание: ${taskSummary}` : 'Напоминание о деле';
           try {
             const trigger = {
               type: TriggerTypes.DATE,
-              date: new Date(t.reminderAt!),
+              date: new Date(plan.reminderAt),
               ...(Platform.OS === 'android' ? { channelId: CHANNEL_ID } : null),
             } as any;
             await Notifications.scheduleNotificationAsync({
+              identifier: `delo_task_${plan.taskId}`,
               content: {
                 title: APP_TITLE,
-                body,
-                data: { tag: TAG_TASK, taskId: t.id },
-                sound: 'default',
+                body: plan.body,
+                data: { tag: TAG_TASK, taskId: plan.taskId },
+                sound: NOTIFICATION_SOUND,
                 ...(Platform.OS === 'android' ? { android: { channelId: CHANNEL_ID } } : null),
               },
               trigger,
             });
           } catch (e) {
-            console.warn('[notifications] scheduleNotificationAsync failed', { taskId: t.id, reminderAt: t.reminderAt, e });
+            console.warn('[notifications] scheduleNotificationAsync failed', { taskId: plan.taskId, reminderAt: plan.reminderAt, e });
           }
         })
       );
@@ -194,7 +197,7 @@ export async function syncTaskReminders(tasks: Task[]) {
 }
 
 export async function disableOverdueReminders() {
+  if (!isNativeNotificationsAvailable()) return;
   await ensureAndroidChannel();
   await cancelByTag(TAG_OVERDUE);
 }
-

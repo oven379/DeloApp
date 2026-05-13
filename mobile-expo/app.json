@@ -45,7 +45,14 @@
       "./plugins/withPickFirstLibworklets.js",
       "./plugins/withAndroidExported.js",
       "expo-router",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "sounds": [
+            "./assets/sounds/reminder.wav"
+          ]
+        }
+      ],
       [
         "expo-splash-screen",
         {

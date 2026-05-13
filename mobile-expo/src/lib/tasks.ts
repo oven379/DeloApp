@@ -1,4 +1,4 @@
-import type { DayStr, Subtask, Task } from '../types';
+import type { DayStr, RepeatRule, Subtask, Task } from '../types';
 
 export function dayStrFromDateLocal(date: Date): DayStr {
   const y = date.getFullYear();
@@ -39,6 +39,9 @@ export function createTask(text: string, order = 0, forDay?: DayStr | null): Tas
     order,
     reminderAt: null,
     subtasks: [],
+    focusRank: null,
+    repeatRule: 'none',
+    repeatSourceId: null,
   };
 }
 
@@ -95,6 +98,73 @@ export function deleteSubtaskFromTask(task: Task, subtaskId: string): Task {
   return subtasks.length === list.length ? task : { ...task, subtasks, updatedAt: Date.now() };
 }
 
+function dateFromDayStr(day: DayStr) {
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+export function getNextRepeatDay(task: Task): DayStr | null {
+  const rule = task.repeatRule && task.repeatRule !== 'none' ? task.repeatRule : null;
+  if (!rule) return null;
+
+  const d = dateFromDayStr(task.forDay);
+  if (rule === 'daily') {
+    d.setDate(d.getDate() + 1);
+    return dayStrFromDateLocal(d);
+  }
+  if (rule === 'weekly') {
+    d.setDate(d.getDate() + 7);
+    return dayStrFromDateLocal(d);
+  }
+  if (rule === 'weekdays') {
+    do {
+      d.setDate(d.getDate() + 1);
+    } while (d.getDay() === 0 || d.getDay() === 6);
+    return dayStrFromDateLocal(d);
+  }
+  return null;
+}
+
+export function createNextRepeatedTask(task: Task, now = Date.now()): Task | null {
+  const nextDay = getNextRepeatDay(task);
+  if (!nextDay) return null;
+
+  let reminderAt: number | null = null;
+  if (task.reminderAt) {
+    const sourceReminder = new Date(task.reminderAt);
+    const nextReminder = dateFromDayStr(nextDay);
+    nextReminder.setHours(sourceReminder.getHours(), sourceReminder.getMinutes(), 0, 0);
+    reminderAt = nextReminder.getTime();
+  }
+
+  return {
+    ...task,
+    id: `t_${now}_${Math.random().toString(36).slice(2, 9)}`,
+    createdAt: now,
+    updatedAt: null,
+    forDay: nextDay,
+    completedAt: null,
+    isOverdue: false,
+    originalForDay: undefined,
+    order: 0,
+    reminderAt,
+    focusRank: null,
+    repeatSourceId: task.repeatSourceId || task.id,
+    subtasks: (task.subtasks || []).map((subtask, index) => ({
+      ...subtask,
+      id: `st_${now}_${index}_${Math.random().toString(36).slice(2, 6)}`,
+      done: false,
+    })),
+  };
+}
+
+export function getRepeatLabel(rule?: RepeatRule | null) {
+  if (rule === 'daily') return 'каждый день';
+  if (rule === 'weekdays') return 'по будням';
+  if (rule === 'weekly') return 'раз в неделю';
+  return 'не повторять';
+}
+
 /** Переносит невыполненные задачи с прошлых дней на сегодня с пометкой просрочки */
 export function rolloverTasks(tasks: Task[]): Task[] {
   const today = todayStr();
@@ -144,4 +214,3 @@ export function formatTaskDate(ts: number) {
   const m = String(d.getMinutes()).padStart(2, '0');
   return `${day}.${month}.${year} · ${h}:${m}`;
 }
-

@@ -19,7 +19,13 @@ export type Task = {
   order?: number;
   reminderAt: number | null;
   subtasks?: Subtask[];
+  /** 1-3 means task is pinned into "focus of the day"; null/undefined means ordinary task. */
+  focusRank?: number | null;
+  repeatRule?: RepeatRule | null;
+  repeatSourceId?: string | null;
 };
+
+export type RepeatRule = 'none' | 'daily' | 'weekdays' | 'weekly';
 
 export type DailyNotificationSlot = {
   enabled: boolean;
@@ -41,4 +47,3 @@ export type Settings = {
   dailyNotifications: DailyNotificationSlot[];
   editorFontSize?: number;
 };
-

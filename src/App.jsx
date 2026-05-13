@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Capacitor, registerPlugin } from '@capacitor/core'
-import { App as CapApp } from '@capacitor/app'
 import { getTasks, saveTasks, getSettings, saveSettings, getSkipDeleteConfirmUntil } from './lib/storage'
 import { rolloverTasks, getTodayStats, getDayStats, createTask, todayStr, tomorrowStr, getCurrentDayStr } from './lib/tasks'
 import {
@@ -17,6 +16,13 @@ import {
 const DeloBoot = registerPlugin('DeloBoot', {
   web: () => ({ getLaunchReason: async () => ({ reason: 'normal' }) }),
 })
+let capAppModule
+async function getCapApp() {
+  if (!capAppModule) {
+    capAppModule = import('@capacitor/app').then((m) => m.App)
+  }
+  return capAppModule
+}
 import './App.css'
 import Header from './components/Header'
 import TaskList from './components/TaskList'
@@ -173,7 +179,7 @@ export default function App() {
   useEffect(() => {
     if (!isNative()) return
     let listenerHandle
-    CapApp.addListener('appStateChange', ({ isActive }) => {
+    getCapApp().then((CapApp) => CapApp.addListener('appStateChange', ({ isActive }) => {
       if (!isActive) return
       setTasks((prev) => {
         const rolled = rolloverTasks(prev)
@@ -183,7 +189,7 @@ export default function App() {
         }
         return prev
       })
-    }).then((h) => { listenerHandle = h })
+    })).then((h) => { listenerHandle = h })
     return () => { listenerHandle?.remove?.() }
   }, [])
 
@@ -201,6 +207,7 @@ export default function App() {
         await syncTaskReminders(tasks)
         await syncDailyNotifications(settings.dailyNotifications)
         await syncOverdueReminder(tasks)
+        const CapApp = await getCapApp()
         await CapApp.exitApp()
       } catch (_) {}
     })()

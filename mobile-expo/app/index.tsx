@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Constants from 'expo-constants';
 import {
   AppState,
-  Dimensions,
+  FlatList,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -14,28 +14,36 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  useColorScheme,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import DraggableFlatList, {
+  NestableDraggableFlatList,
   NestableScrollContainer,
   RenderItemParams,
 } from 'react-native-draggable-flatlist';
-import { CalendarList } from 'react-native-calendars';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 
-import type { DayStr, Settings, Subtask, Task } from '../src/types';
+import type { DayStr, RepeatRule, Settings, Subtask, Task } from '../src/types';
+import { CalendarModal } from '../src/components/CalendarModal';
+import { ConfirmDeleteModal } from '../src/components/ConfirmDeleteModal';
+import { PostponeTaskModal } from '../src/components/PostponeTaskModal';
+import { ThankYouToast } from '../src/components/ThankYouToast';
+import { type DayView, formatHeaderDate, isDayStr, isPastDayStr, taskSortKey } from '../src/lib/dayView';
 import { DEFAULT_SETTINGS, getSettings, getSkipDeleteConfirmUntil, getTasks, saveSettings, saveTasks } from '../src/lib/storage';
+import { parseLinksAndPhones } from '../src/lib/textSegments';
+import { useResolvedTheme } from '../hooks/use-resolved-theme';
 import {
   addSubtaskToTask,
+  createNextRepeatedTask,
   createTask,
   dayStrFromDateLocal,
   deleteSubtaskFromTask,
   getCurrentDayStr,
   getDayStats,
+  getRepeatLabel,
   getTodayStats,
   rolloverTasks,
   todayStr,
@@ -46,93 +54,7 @@ import {
 import { disableOverdueReminders, requestPermissions, syncDailyNotifications, syncTaskReminders } from '../src/lib/notifications';
 
 const WEEKDAY_SHORT = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
-
-type DayView = 'today' | 'tomorrow' | DayStr;
-
-function isDayStr(x: string): x is DayStr {
-  return /^\d{4}-\d{2}-\d{2}$/.test(x);
-}
-
-function formatHeaderDate(dayView: DayView) {
-  const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'long' };
-  if (dayView === 'today') return new Date().toLocaleDateString('ru-RU', opts);
-  if (dayView === 'tomorrow') {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    return d.toLocaleDateString('ru-RU', opts);
-  }
-  if (isDayStr(dayView)) {
-    const [y, m, d] = dayView.split('-').map(Number);
-    return new Date(y, m - 1, d).toLocaleDateString('ru-RU', opts);
-  }
-  return new Date().toLocaleDateString('ru-RU', opts);
-}
-
-function useResolvedTheme(theme: Settings['theme']) {
-  const system = useColorScheme(); // 'light' | 'dark' | null
-  if (theme === 'dark') return 'dark';
-  if (theme === 'light') return 'light';
-  return system ?? 'dark';
-}
-
-function taskSortKey(t: Task) {
-  return t.order ?? 0;
-}
-
-function isPastDayStr(day: DayStr) {
-  // DayStr is YYYY-MM-DD, so lexical compare works.
-  return day < todayStr();
-}
-
-type TextSegment =
-  | { type: 'text'; value: string }
-  | { type: 'url'; value: string }
-  | { type: 'phone'; value: string }
-  | { type: 'link'; label: string; url: string };
-
-function parseLinksAndPhones(text: string): TextSegment[] {
-  if (!text || !text.trim()) return [{ type: 'text', value: text }];
-  const all: { index: number; end: number; seg: TextSegment }[] = [];
-  let m: RegExpExecArray | null;
-
-  // [текст](url) — как в веб-версии
-  const linkRe = /\[([^\]]*)\]\(([^)]*)\)/g;
-  linkRe.lastIndex = 0;
-  while ((m = linkRe.exec(text)) !== null) {
-    const label = m[1] || m[2];
-    const url = m[2].trim();
-    if (url) all.push({ index: m.index, end: m.index + m[0].length, seg: { type: 'link', label, url } });
-  }
-
-  // URL: http(s) или www. (не внутри уже найденного []())
-  const urlRe = /https?:\/\/[^\s]+|www\.[^\s]+/gi;
-  urlRe.lastIndex = 0;
-  while ((m = urlRe.exec(text)) !== null) {
-    if (!all.some((a) => a.index <= m!.index && a.end >= m!.index + m![0].length)) {
-      all.push({ index: m.index, end: m.index + m[0].length, seg: { type: 'url', value: m[0] } });
-    }
-  }
-
-  // Телефон: +7..., 8...
-  const phoneRe = /\+?[78][\s\-\(\)]*\d[\d\s\-\(\)]{9,}/g;
-  phoneRe.lastIndex = 0;
-  while ((m = phoneRe.exec(text)) !== null) {
-    if (!all.some((a) => a.index <= m!.index && a.end >= m!.index + m![0].length)) {
-      all.push({ index: m.index, end: m.index + m[0].length, seg: { type: 'phone', value: m[0] } });
-    }
-  }
-
-  all.sort((a, b) => a.index - b.index);
-  const segments: TextSegment[] = [];
-  let last = 0;
-  for (const { index, end, seg } of all) {
-    if (index > last) segments.push({ type: 'text', value: text.slice(last, index) });
-    segments.push(seg);
-    last = end;
-  }
-  if (last < text.length) segments.push({ type: 'text', value: text.slice(last) });
-  return segments.length ? segments : [{ type: 'text', value: text }];
-}
+const IS_NATIVE_NOTIFICATIONS = Platform.OS === 'ios' || Platform.OS === 'android';
 
 export default function DeloScreen() {
   const insets = useSafeAreaInsets();
@@ -145,6 +67,7 @@ export default function DeloScreen() {
   const [newTaskText, setNewTaskText] = useState('');
   const newTaskTextRef = useRef('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [subtaskDraft, setSubtaskDraft] = useState('');
@@ -217,9 +140,9 @@ export default function DeloScreen() {
 
     if (requestId) {
       setReminderNotifications((prev) => prev.filter((n) => n.requestId !== requestId));
-      Notifications.dismissNotificationAsync(requestId).catch(() => {});
+      if (IS_NATIVE_NOTIFICATIONS) Notifications.dismissNotificationAsync(requestId).catch(() => {});
     }
-    (Notifications as any).clearLastNotificationResponseAsync?.().catch(() => {});
+    if (IS_NATIVE_NOTIFICATIONS) (Notifications as any).clearLastNotificationResponseAsync?.().catch(() => {});
 
     setSettingsOpen(false);
     setCalendarOpen(false);
@@ -251,14 +174,16 @@ export default function DeloScreen() {
         setTasks(rolled);
         setSettingsState(s0);
 
-        // Только запрашиваем разрешения при первом запуске. Синхронизацию напоминаний делает эффект ниже.
-        // Также отключаем устаревшие "просроченные" уведомления (если были запланированы в прошлых версиях).
-        requestPermissions()
-          .then(() => disableOverdueReminders())
-          .catch((e) => console.warn('[notifications] init failed', e));
+        if (IS_NATIVE_NOTIFICATIONS) {
+          // Только запрашиваем разрешения при первом запуске. Синхронизацию напоминаний делает эффект ниже.
+          // Также отключаем устаревшие "просроченные" уведомления (если были запланированы в прошлых версиях).
+          requestPermissions()
+            .then(() => disableOverdueReminders())
+            .catch((e) => console.warn('[notifications] init failed', e));
 
-        const response = await Notifications.getLastNotificationResponseAsync();
-        if (!cancelled) handleNotificationOpen(response);
+          const response = await Notifications.getLastNotificationResponseAsync();
+          if (!cancelled) handleNotificationOpen(response);
+        }
       } catch {
         if (!cancelled) {
           setTasks([]);
@@ -285,6 +210,7 @@ export default function DeloScreen() {
   const checkBgColor = resolvedTheme === 'light' ? '#eef2f7' : '#142133';
   const pickerLabelColor = resolvedTheme === 'dark' ? '#cbd5e1' : colors.muted;
   const dateTimePickerTextColor = resolvedTheme === 'dark' ? '#e5e7eb' : '#111827';
+  const EditScrollContainer = Platform.OS === 'web' ? ScrollView : NestableScrollContainer;
 
   function renderTaskDatesMeta(item: Task) {
     const reminderLineColor =
@@ -299,6 +225,12 @@ export default function DeloScreen() {
     return (
       <View style={{ alignSelf: 'stretch', gap: 2 }}>
         <Text style={[styles.taskMeta, { color: colors.muted }]}>Создано: {formatTaskDateTime(item.createdAt)}</Text>
+        {item.focusRank ? (
+          <Text style={[styles.taskMeta, { color: colors.accent }]}>Фокус дня #{item.focusRank}</Text>
+        ) : null}
+        {item.repeatRule && item.repeatRule !== 'none' ? (
+          <Text style={[styles.taskMeta, { color: colors.muted }]}>Повтор: {getRepeatLabel(item.repeatRule)}</Text>
+        ) : null}
         {item.reminderAt != null ? (
           <Text style={[styles.taskMeta, { color: reminderLineColor }]}>Напоминание: {formatTaskDateTime(item.reminderAt)}</Text>
         ) : null}
@@ -319,7 +251,7 @@ export default function DeloScreen() {
     const sub = AppState.addEventListener('change', async (state) => {
       if (state !== 'active') return;
       // При возвращении в приложение — очистим бейдж и пересинхронизируем напоминания (после перезагрузки/обновлений).
-      Notifications.setBadgeCountAsync(0).catch(() => {});
+      if (IS_NATIVE_NOTIFICATIONS) Notifications.setBadgeCountAsync(0).catch(() => {});
       setTasks((prev) => {
         const rolled = rolloverTasks(prev);
         if (rolled !== prev) {
@@ -329,15 +261,18 @@ export default function DeloScreen() {
         return prev;
       });
       // If app became active after tapping a notification, open task/main view accordingly.
-      Notifications.getLastNotificationResponseAsync()
-        .then((response) => handleNotificationOpen(response))
-        .catch(() => {});
+      if (IS_NATIVE_NOTIFICATIONS) {
+        Notifications.getLastNotificationResponseAsync()
+          .then((response) => handleNotificationOpen(response))
+          .catch(() => {});
+      }
     });
     return () => sub.remove();
   }, []);
 
   // Лисенеры уведомлений: пополняем список "Уведомления" внутри приложения.
   useEffect(() => {
+    if (!IS_NATIVE_NOTIFICATIONS) return;
     const sub1 = Notifications.addNotificationReceivedListener((n) => {
       const now = Date.now();
       const text = n.request.content.body || 'Напоминание';
@@ -396,7 +331,7 @@ export default function DeloScreen() {
     setReminderNotifications((prev) => prev.filter((x) => x.requestId !== n.requestId));
 
     // Убираем и из системной шторки (если устройство/платформа поддерживает)
-    Notifications.dismissNotificationAsync(n.requestId).catch(() => {});
+    if (IS_NATIVE_NOTIFICATIONS) Notifications.dismissNotificationAsync(n.requestId).catch(() => {});
 
     // Сбрасываем открытые модалки, чтобы редактор точно отобразился
     setSettingsOpen(false);
@@ -498,10 +433,16 @@ export default function DeloScreen() {
       : (list: Task[]) => list;
 
     const forDay = tasks.filter((t) => t.forDay === currentDayStr);
-    const allInc = forDay.filter((t) => !t.completedAt).sort((a, b) => taskSortKey(a) - taskSortKey(b));
+    const allInc = forDay.filter((t) => !t.completedAt).sort((a, b) => {
+      const af = a.focusRank ?? 99;
+      const bf = b.focusRank ?? 99;
+      if (af !== bf) return af - bf;
+      return taskSortKey(a) - taskSortKey(b);
+    });
     const done = forDay.filter((t) => t.completedAt).sort((a, b) => (a.completedAt ?? 0) - (b.completedAt ?? 0));
-    return { incomplete: filter(allInc), completed: filter(done) };
-  }, [tasks, currentDayStr, searchQuery]);
+    const focused = allInc.filter((t) => !!t.focusRank);
+    return { incomplete: filter(focusMode ? focused : allInc), completed: focusMode ? [] : filter(done) };
+  }, [tasks, currentDayStr, searchQuery, focusMode]);
 
   const addTask = (text: string, forDay?: DayStr) => {
     const day = forDay ?? currentDayStr;
@@ -522,25 +463,78 @@ export default function DeloScreen() {
 
   const toggleTask = (id: string) => {
     const wasCompleting = tasks.find((t) => t.id === id)?.completedAt == null;
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? {
-              ...t,
-              completedAt: t.completedAt ? null : Date.now(),
-              isOverdue: false,
-              forDay: todayStr(),
-            }
-          : t
-      )
-    );
+    setTasks((prev) => {
+      const now = Date.now();
+      let repeatedTask: Task | null = null;
+      const next = prev.map((t) => {
+        if (t.id !== id) return t;
+        const completing = t.completedAt == null;
+        if (completing) repeatedTask = createNextRepeatedTask(t, now);
+        return {
+          ...t,
+          completedAt: t.completedAt ? null : now,
+          isOverdue: false,
+          forDay: completing ? todayStr() : t.forDay,
+          focusRank: completing ? null : t.focusRank ?? null,
+        };
+      });
+      if (!repeatedTask) return next;
+      const exists = next.some(
+        (t) =>
+          !t.completedAt &&
+          (t.repeatSourceId || t.id) === repeatedTask!.repeatSourceId &&
+          t.forDay === repeatedTask!.forDay
+      );
+      if (exists) return next;
+      const shifted = next.map((t) => {
+        if (t.forDay !== repeatedTask!.forDay || t.completedAt) return t;
+        return { ...t, order: (t.order ?? 0) + 1 };
+      });
+      return [...shifted, repeatedTask];
+    });
     if (wasCompleting) {
       setThankYouVisible(true);
       setTimeout(() => setThankYouVisible(false), 2500);
     }
   };
 
-  const TaskRow = ({ item, drag, isActive }: RenderItemParams<Task>) => {
+  const toggleFocusTask = (id: string) => {
+    setTasks((prev) => {
+      const target = prev.find((t) => t.id === id);
+      if (!target || target.completedAt || target.forDay !== currentDayStr) return prev;
+      const focused = prev
+        .filter((t) => t.forDay === currentDayStr && !t.completedAt && t.focusRank && t.id !== id)
+        .sort((a, b) => (a.focusRank ?? 99) - (b.focusRank ?? 99));
+
+      if (target.focusRank) {
+        return prev.map((t) => {
+          if (t.id === id) return { ...t, focusRank: null, updatedAt: Date.now() };
+          const nextRankIndex = focused.findIndex((x) => x.id === t.id);
+          return nextRankIndex >= 0 ? { ...t, focusRank: nextRankIndex + 1 } : t;
+        });
+      }
+
+      if (focused.length >= 3) return prev;
+      return prev.map((t) => (t.id === id ? { ...t, focusRank: focused.length + 1, updatedAt: Date.now() } : t));
+    });
+  };
+
+  const setTaskRepeatRule = (id: string, repeatRule: RepeatRule) => {
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === id
+          ? {
+              ...t,
+              repeatRule,
+              repeatSourceId: repeatRule === 'none' ? null : t.repeatSourceId || t.id,
+              updatedAt: Date.now(),
+            }
+          : t
+      )
+    );
+  };
+
+  const TaskRow = ({ item, drag, isActive = false }: { item: Task; drag?: () => void; isActive?: boolean }) => {
     return (
       <Swipeable
         overshootLeft={false}
@@ -548,30 +542,10 @@ export default function DeloScreen() {
         leftThreshold={56}
         rightThreshold={48}
         renderLeftActions={() => (
-          <View
-            style={{
-              justifyContent: 'center',
-              alignItems: 'flex-start',
-              backgroundColor: colors.overdue,
-              borderRadius: 14,
-              marginVertical: 6,
-              paddingHorizontal: 18,
-            }}>
-            <Text style={{ color: '#fff', fontWeight: '700' }}>Удалить</Text>
-          </View>
+          <View style={styles.hiddenSwipeAction} />
         )}
         renderRightActions={() => (
-          <View
-            style={{
-              justifyContent: 'center',
-              alignItems: 'flex-end',
-              backgroundColor: '#22c55e',
-              borderRadius: 14,
-              marginVertical: 6,
-              paddingHorizontal: 18,
-            }}>
-            <Text style={{ color: '#fff', fontWeight: '700' }}>Готово ✓</Text>
-          </View>
+          <View style={styles.hiddenSwipeAction} />
         )}
         onSwipeableOpen={(direction, swipeable) => {
           swipeable.close();
@@ -582,14 +556,14 @@ export default function DeloScreen() {
           }
         }}>
         <Pressable
-          onLongPress={drag}
+          onLongPress={Platform.OS === 'web' ? undefined : drag}
           onPress={() => setEditingTaskId(item.id)}
           style={[
             styles.taskRow,
             listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
             {
               backgroundColor: colors.surface,
-              borderColor: item.isOverdue && !item.completedAt ? colors.overdue : colors.border,
+              borderColor: item.focusRank ? colors.accent : item.isOverdue && !item.completedAt ? colors.overdue : colors.border,
               opacity: isActive ? 0.7 : 1,
             },
           ]}>
@@ -647,6 +621,20 @@ export default function DeloScreen() {
             {renderTaskDatesMeta(item)}
           </View>
           <View style={styles.taskRowActions}>
+            {!item.completedAt && currentDayStr === item.forDay && (
+              <Pressable
+                onPress={(e) => {
+                  e?.stopPropagation?.();
+                  toggleFocusTask(item.id);
+                }}
+                style={[
+                  styles.focusChip,
+                  { backgroundColor: item.focusRank ? colors.accent : colors.surface2 },
+                ]}>
+                <Ionicons name={item.focusRank ? 'radio-button-on' : 'radio-button-off'} size={16} color={item.focusRank ? '#fff' : colors.text} />
+                {item.focusRank ? <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>{item.focusRank}</Text> : null}
+              </Pressable>
+            )}
             {dayView === 'today' && currentDayStr === todayStr() && (
               <Pressable
                 onPress={(e) => {
@@ -686,6 +674,12 @@ export default function DeloScreen() {
 
   const addSubtask = (taskId: string, text: string) => {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? addSubtaskToTask(t, text) : t)));
+  };
+
+  const reorderSubtasks = (taskId: string, data: Subtask[]) => {
+    setTasks((prev) =>
+      prev.map((t) => (t.id === taskId ? { ...t, subtasks: data, updatedAt: Date.now() } : t))
+    );
   };
 
   const startSubtaskEdit = (subtask: Subtask) => {
@@ -851,6 +845,108 @@ export default function DeloScreen() {
     setReminderPickerOpen(false);
   };
 
+  const emptyList = (
+    <View style={styles.empty}>
+      <Text style={[styles.emptyTitle, { color: colors.text }]}>
+        {searchQuery.trim()
+          ? 'По запросу ничего не найдено'
+          : dayView === 'tomorrow'
+            ? 'Пока нет дел на завтра'
+            : isDayStr(dayView)
+              ? `Нет дел на ${dayView}`
+              : 'Нет дел на сегодня'}
+      </Text>
+      <Text style={[styles.emptyHint, { color: colors.muted }]}>
+        {searchQuery.trim() ? 'Измените запрос или очистите поле поиска.' : 'Добавьте первое дело в поле внизу экрана.'}
+      </Text>
+      {!searchQuery.trim() && (
+        <Pressable onPress={() => addInputRef.current?.focus()} style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
+          <Text style={{ color: '#fff' }}>Создать дело</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+
+  const completedListFooter =
+    completed.length > 0 ? (
+      <View style={styles.doneWrap}>
+        <Text style={[styles.doneTitle, { color: colors.muted }]}>Готово</Text>
+        {completed.map((t) => (
+          <Swipeable
+            key={t.id}
+            overshootLeft={false}
+            leftThreshold={56}
+            renderLeftActions={() => <View style={styles.hiddenSwipeAction} />}
+            onSwipeableOpen={(direction, swipeable) => {
+              swipeable.close();
+              if (direction === 'left') deleteTask(t.id);
+            }}>
+            <Pressable
+              onPress={() => setEditingTaskId(t.id)}
+              style={[
+                styles.taskRow,
+                listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
+                { backgroundColor: colors.surface, borderColor: colors.border, opacity: 0.75 },
+              ]}>
+              <Pressable
+                onPress={(e) => {
+                  e?.stopPropagation?.();
+                  toggleTask(t.id);
+                }}
+                style={[
+                  styles.check,
+                  listMode === 'compact' ? styles.checkCompact : styles.checkExpanded,
+                  { borderColor: checkBorderColor, backgroundColor: checkBgColor },
+                ]}>
+                <Text style={{ color: colors.text }}>✓</Text>
+              </Pressable>
+              <View style={styles.taskTextCol}>
+                <Text
+                  style={[styles.taskText, { color: colors.text, textDecorationLine: 'line-through' }]}
+                  numberOfLines={listMode === 'compact' ? 5 : 8}>
+                  {parseLinksAndPhones(t.text).map((seg, i) =>
+                    seg.type === 'text' ? (
+                      <Text key={i} style={{ color: colors.text, textDecorationLine: 'line-through' }}>
+                        {seg.value}
+                      </Text>
+                    ) : seg.type === 'link' ? (
+                      <Text
+                        key={i}
+                        style={{ color: colors.link, textDecorationLine: 'underline' }}
+                        onPress={() => {
+                          const url = seg.url.startsWith('http') ? seg.url : `https://${seg.url}`;
+                          Linking.openURL(url).catch(() => {});
+                        }}>
+                        {seg.label}
+                      </Text>
+                    ) : seg.type === 'url' ? (
+                      <Text
+                        key={i}
+                        style={{ color: colors.link, textDecorationLine: 'underline' }}
+                        onPress={() => {
+                          const url = seg.value.startsWith('http') ? seg.value : `https://${seg.value}`;
+                          Linking.openURL(url).catch(() => {});
+                        }}>
+                        {seg.value}
+                      </Text>
+                    ) : (
+                      <Text
+                        key={i}
+                        style={{ color: colors.link, textDecorationLine: 'underline' }}
+                        onPress={() => Linking.openURL(`tel:${seg.value.replace(/\D/g, '')}`).catch(() => {})}>
+                        {seg.value}
+                      </Text>
+                    )
+                  )}
+                </Text>
+                {renderTaskDatesMeta(t)}
+              </View>
+            </Pressable>
+          </Swipeable>
+        ))}
+      </View>
+    ) : null;
+
   if (!settings) {
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]} edges={['top', 'left', 'right', 'bottom']}>
@@ -894,6 +990,11 @@ export default function DeloScreen() {
               <Pressable onPress={() => setCalendarOpen(true)} style={[styles.iconBtn, { backgroundColor: colors.surface }]}>
                 <Ionicons name="calendar-outline" size={22} color={colors.text} />
               </Pressable>
+              <Pressable
+                onPress={() => setFocusMode((v) => !v)}
+                style={[styles.iconBtn, { backgroundColor: focusMode ? colors.accent : colors.surface }]}>
+                <Ionicons name="radio-button-on-outline" size={22} color={focusMode ? '#fff' : colors.text} />
+              </Pressable>
               <Pressable onPress={() => setSettingsOpen(true)} style={[styles.iconBtn, { backgroundColor: colors.surface }]}>
                 <Ionicons name="settings-outline" size={22} color={colors.text} />
               </Pressable>
@@ -929,125 +1030,28 @@ export default function DeloScreen() {
             />
           </View>
 
-          <DraggableFlatList
-            data={incomplete}
-            keyExtractor={(item) => item.id}
-            onDragEnd={(p) => reorderTasks(p, currentDayStr)}
-            renderItem={(p: RenderItemParams<Task>) => <TaskRow {...p} />}
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <Text style={[styles.emptyTitle, { color: colors.text }]}>
-                  {searchQuery.trim()
-                    ? 'По запросу ничего не найдено'
-                    : dayView === 'tomorrow'
-                      ? 'Пока нет дел на завтра'
-                      : isDayStr(dayView)
-                        ? `Нет дел на ${dayView}`
-                        : 'Нет дел на сегодня'}
-                </Text>
-                <Text style={[styles.emptyHint, { color: colors.muted }]}>
-                  {searchQuery.trim() ? 'Измените запрос или очистите поле поиска.' : 'Добавьте первое дело в поле внизу экрана.'}
-                </Text>
-                {!searchQuery.trim() && (
-                  <Pressable
-                    onPress={() => addInputRef.current?.focus()}
-                    style={[styles.primaryBtn, { backgroundColor: colors.accent }]}>
-                    <Text style={{ color: '#fff' }}>Создать дело</Text>
-                  </Pressable>
-                )}
-              </View>
-            }
-            ListFooterComponent={
-              completed.length > 0 ? (
-                <View style={styles.doneWrap}>
-                  <Text style={[styles.doneTitle, { color: colors.muted }]}>Готово</Text>
-                  {completed.map((t) => (
-                    <Swipeable
-                      key={t.id}
-                      overshootLeft={false}
-                      leftThreshold={56}
-                      renderLeftActions={() => (
-                        <View
-                          style={{
-                            justifyContent: 'center',
-                            alignItems: 'flex-start',
-                            backgroundColor: colors.overdue,
-                            borderRadius: 14,
-                            marginVertical: 6,
-                            paddingHorizontal: 18,
-                          }}>
-                          <Text style={{ color: '#fff', fontWeight: '700' }}>Удалить</Text>
-                        </View>
-                      )}
-                      onSwipeableOpen={(direction, swipeable) => {
-                        swipeable.close();
-                        if (direction === 'left') deleteTask(t.id);
-                      }}>
-                      <Pressable
-                        onPress={() => setEditingTaskId(t.id)}
-                        style={[
-                          styles.taskRow,
-                          listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
-                          { backgroundColor: colors.surface, borderColor: colors.border, opacity: 0.75 },
-                        ]}>
-                        <Pressable
-                          onPress={(e) => {
-                            e?.stopPropagation?.();
-                            toggleTask(t.id);
-                          }}
-                          style={[
-                            styles.check,
-                            listMode === 'compact' ? styles.checkCompact : styles.checkExpanded,
-                            { borderColor: checkBorderColor, backgroundColor: checkBgColor },
-                          ]}>
-                          <Text style={{ color: colors.text }}>✓</Text>
-                        </Pressable>
-                        <View style={styles.taskTextCol}>
-                          <Text
-                            style={[styles.taskText, { color: colors.text, textDecorationLine: 'line-through' }]}
-                            numberOfLines={listMode === 'compact' ? 5 : 8}>
-                            {parseLinksAndPhones(t.text).map((seg, i) =>
-                              seg.type === 'text' ? (
-                                <Text key={i} style={{ color: colors.text, textDecorationLine: 'line-through' }}>{seg.value}</Text>
-                              ) : seg.type === 'link' ? (
-                                <Text
-                                  key={i}
-                                  style={{ color: colors.link, textDecorationLine: 'underline' }}
-                                  onPress={() => {
-                                    const url = seg.url.startsWith('http') ? seg.url : `https://${seg.url}`;
-                                    Linking.openURL(url).catch(() => {});
-                                  }}>
-                                  {seg.label}
-                                </Text>
-                              ) : seg.type === 'url' ? (
-                                <Text
-                                  key={i}
-                                  style={{ color: colors.link, textDecorationLine: 'underline' }}
-                                  onPress={() => {
-                                    const url = seg.value.startsWith('http') ? seg.value : `https://${seg.value}`;
-                                    Linking.openURL(url).catch(() => {});
-                                  }}>
-                                  {seg.value}
-                                </Text>
-                              ) : (
-                                <Text
-                                  key={i}
-                                  style={{ color: colors.link, textDecorationLine: 'underline' }}
-                                  onPress={() => Linking.openURL(`tel:${seg.value.replace(/\D/g, '')}`).catch(() => {})}>
-                                  {seg.value}
-                                </Text>
-                              )
-                            )}
-                          </Text>
-                          {renderTaskDatesMeta(t)}
-                        </View>
-                      </Pressable>
-                    </Swipeable>
-                  ))}
-                </View>
-              ) : null
-            }
-          />
+          {Platform.OS === 'web' ? (
+            <FlatList
+              data={incomplete}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => <TaskRow item={item} />}
+              ListEmptyComponent={emptyList}
+              ListFooterComponent={completedListFooter}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: footerPad }}
+            />
+          ) : (
+            <DraggableFlatList
+              data={incomplete}
+              keyExtractor={(item) => item.id}
+              onDragEnd={(p) => reorderTasks(p, currentDayStr)}
+              renderItem={(p: RenderItemParams<Task>) => <TaskRow {...p} />}
+              ListEmptyComponent={emptyList}
+              ListFooterComponent={completedListFooter}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: footerPad }}
+            />
+          )}
         </View>
 
         <View
@@ -1105,54 +1109,16 @@ export default function DeloScreen() {
           </Pressable>
         </View>
 
-        {/* Calendar modal — одинаковые отступы от краёв окна */}
-        <Modal visible={calendarOpen} animationType="slide" transparent onRequestClose={() => setCalendarOpen(false)}>
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalSheet, styles.calendarSheet, { backgroundColor: colors.bg, height: '85%', overflow: 'hidden' }]}>
-              <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>Планы на день</Text>
-                <Pressable onPress={() => setCalendarOpen(false)}>
-                  <Text style={{ color: colors.muted, fontSize: 18 }}>✕</Text>
-                </Pressable>
-              </View>
-              <View style={[styles.calendarListWrap, { overflow: 'hidden' }]}>
-                <CalendarList
-                  // Allow navigating to past dates to review previous tasks.
-                  pastScrollRange={24}
-                  futureScrollRange={36}
-                  onDayPress={(d) => {
-                    const ds = d.dateString as DayStr;
-                    setDayView(ds);
-                    setCalendarOpen(false);
-                  }}
-                  markingType="multi-dot"
-                  markedDates={markedDates}
-                  style={styles.calendarListOuter}
-                  calendarStyle={styles.calendarListInner}
-                  theme={{
-                  calendarBackground: 'transparent',
-                  dayTextColor: colors.text,
-                  monthTextColor: colors.text,
-                  textDisabledColor: colors.muted,
-                  selectedDayBackgroundColor: colors.accent,
-                  selectedDayTextColor: '#fff',
-                  todayTextColor: colors.accent,
-                  arrowColor: colors.text,
-                  weekVerticalMargin: 4,
-                }}
-                />
-              </View>
-              <View style={styles.calendarLegend}>
-                <Text style={{ color: colors.muted, fontSize: 12 }}>
-                  Красная точка — до даты остаётся меньше 7 дней.
-                </Text>
-                <Text style={{ color: colors.muted, fontSize: 12 }}>
-                  Зелёная — до даты остаётся 7 дней и больше.
-                </Text>
-              </View>
-            </View>
-          </View>
-        </Modal>
+        <CalendarModal
+          visible={calendarOpen}
+          colors={colors}
+          markedDates={markedDates}
+          onClose={() => setCalendarOpen(false)}
+          onSelectDay={(day) => {
+            setDayView(day);
+            setCalendarOpen(false);
+          }}
+        />
 
         {/* Settings modal — вкладки Уведомления / Настройки, как на референсе */}
         <Modal visible={settingsOpen} animationType="slide" transparent onRequestClose={() => setSettingsOpen(false)}>
@@ -1399,7 +1365,7 @@ export default function DeloScreen() {
                   <Text style={{ color: colors.muted, fontSize: 18 }}>✕</Text>
                 </Pressable>
               </View>
-              <NestableScrollContainer
+              <EditScrollContainer
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={{ paddingBottom: 24 + keyboardHeight }}
                 showsVerticalScrollIndicator={false}>
@@ -1451,97 +1417,112 @@ export default function DeloScreen() {
               {(() => {
                 const list = editingTask?.subtasks ?? [];
                 const taskId = editingTask?.id;
+                const renderSubtaskRow = (st: Subtask, drag?: () => void, isActive = false) => {
+                  if (!taskId) return null;
+                  const isEditing = editingSubtaskId === st.id;
+                  return (
+                    <Pressable
+                      key={st.id}
+                      onLongPress={Platform.OS === 'web' || isEditing ? undefined : drag}
+                      delayLongPress={180}
+                      style={[
+                        styles.slotRow,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor: colors.surface,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 8,
+                          opacity: isActive ? 0.82 : st.done && !isEditing ? 0.72 : 1,
+                        },
+                      ]}>
+                      <Pressable
+                        onPress={() => toggleSubtask(taskId, st.id)}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        style={{
+                          width: 44,
+                          height: 44,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: st.done }}
+                        accessibilityLabel={st.done ? 'Отметить невыполненным' : 'Отметить выполненным'}>
+                        <Text
+                          style={{
+                            color: st.done ? colors.accent : colors.text,
+                            fontSize: 28,
+                            lineHeight: 30,
+                          }}>
+                          {st.done ? '☑' : '☐'}
+                        </Text>
+                      </Pressable>
+                      {isEditing ? (
+                        <TextInput
+                          value={subtaskEditDraft}
+                          onChangeText={setSubtaskEditDraft}
+                          autoFocus
+                          multiline
+                          style={[styles.addInput, { flex: 1, backgroundColor: colors.bg, color: colors.text, minHeight: 44 }]}
+                          returnKeyType="done"
+                          onSubmitEditing={() => saveSubtaskEdit(taskId, st.id)}
+                        />
+                      ) : (
+                        <Pressable
+                          onPress={() => startSubtaskEdit(st)}
+                          style={{ flex: 1, minHeight: 44, justifyContent: 'center' }}
+                          accessibilityRole="button"
+                          accessibilityLabel="Редактировать поддело">
+                          <Text
+                            style={{
+                              color: st.done ? colors.muted : colors.text,
+                              textDecorationLine: st.done ? 'line-through' : 'none',
+                              fontSize: 15,
+                            }}
+                            numberOfLines={2}>
+                            {st.text}
+                          </Text>
+                        </Pressable>
+                      )}
+                      {isEditing ? (
+                        <>
+                          <Pressable onPress={() => saveSubtaskEdit(taskId, st.id)} hitSlop={10}>
+                            <Text style={{ color: colors.accent, fontSize: 18 }}>✓</Text>
+                          </Pressable>
+                          <Pressable onPress={cancelSubtaskEdit} hitSlop={10}>
+                            <Text style={{ color: colors.muted, fontSize: 18 }}>×</Text>
+                          </Pressable>
+                        </>
+                      ) : (
+                        <>
+                          <Pressable onPress={() => startSubtaskEdit(st)} hitSlop={10}>
+                            <Text style={{ color: colors.muted }}>✎</Text>
+                          </Pressable>
+                          <Pressable onPress={() => deleteSubtask(taskId, st.id)} hitSlop={10}>
+                            <Text style={{ color: colors.muted }}>🗑️</Text>
+                          </Pressable>
+                        </>
+                      )}
+                    </Pressable>
+                  );
+                };
                 return (
                   <View style={{ gap: 8 }}>
                     {list.length === 0 ? (
                       <Text style={{ color: colors.muted }}>Пока нет поддел.</Text>
                     ) : taskId ? (
-                      list.map((st) => {
-                        const isEditing = editingSubtaskId === st.id;
-                        return (
-                          <View
-                            key={st.id}
-                            style={[
-                              styles.slotRow,
-                              {
-                                borderColor: colors.border,
-                                backgroundColor: colors.surface,
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                gap: 8,
-                                opacity: st.done && !isEditing ? 0.72 : 1,
-                              },
-                            ]}>
-                            <Pressable
-                              onPress={() => toggleSubtask(taskId, st.id)}
-                              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                              style={{
-                                width: 44,
-                                height: 44,
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                              }}
-                              accessibilityRole="checkbox"
-                              accessibilityState={{ checked: st.done }}
-                              accessibilityLabel={st.done ? 'Отметить невыполненным' : 'Отметить выполненным'}>
-                              <Text
-                                style={{
-                                  color: st.done ? colors.accent : colors.text,
-                                  fontSize: 28,
-                                  lineHeight: 30,
-                                }}>
-                                {st.done ? '☑' : '☐'}
-                              </Text>
-                            </Pressable>
-                            {isEditing ? (
-                              <TextInput
-                                value={subtaskEditDraft}
-                                onChangeText={setSubtaskEditDraft}
-                                autoFocus
-                                multiline
-                                style={[styles.addInput, { flex: 1, backgroundColor: colors.bg, color: colors.text, minHeight: 44 }]}
-                                returnKeyType="done"
-                                onSubmitEditing={() => saveSubtaskEdit(taskId, st.id)}
-                              />
-                            ) : (
-                              <Pressable
-                                onPress={() => startSubtaskEdit(st)}
-                                style={{ flex: 1, minHeight: 44, justifyContent: 'center' }}
-                                accessibilityRole="button"
-                                accessibilityLabel="Редактировать поддело">
-                                <Text
-                                  style={{
-                                    color: st.done ? colors.muted : colors.text,
-                                    textDecorationLine: st.done ? 'line-through' : 'none',
-                                    fontSize: 15,
-                                  }}
-                                  numberOfLines={2}>
-                                  {st.text}
-                                </Text>
-                              </Pressable>
-                            )}
-                            {isEditing ? (
-                              <>
-                                <Pressable onPress={() => saveSubtaskEdit(taskId, st.id)} hitSlop={10}>
-                                  <Text style={{ color: colors.accent, fontSize: 18 }}>✓</Text>
-                                </Pressable>
-                                <Pressable onPress={cancelSubtaskEdit} hitSlop={10}>
-                                  <Text style={{ color: colors.muted, fontSize: 18 }}>×</Text>
-                                </Pressable>
-                              </>
-                            ) : (
-                              <>
-                                <Pressable onPress={() => startSubtaskEdit(st)} hitSlop={10}>
-                                  <Text style={{ color: colors.muted }}>✎</Text>
-                                </Pressable>
-                                <Pressable onPress={() => deleteSubtask(taskId, st.id)} hitSlop={10}>
-                                  <Text style={{ color: colors.muted }}>🗑️</Text>
-                                </Pressable>
-                              </>
-                            )}
-                          </View>
-                        );
-                      })
+                      Platform.OS === 'web' ? (
+                        <View style={{ gap: 8 }}>{list.map((st) => renderSubtaskRow(st))}</View>
+                      ) : (
+                        <NestableDraggableFlatList
+                          data={list}
+                          keyExtractor={(st) => st.id}
+                          scrollEnabled={false}
+                          activationDistance={12}
+                          onDragEnd={({ data }) => reorderSubtasks(taskId, data)}
+                          renderItem={({ item: st, drag, isActive }: RenderItemParams<Subtask>) => renderSubtaskRow(st, drag, isActive)}
+                        />
+                      )
                     ) : null}
 
                     <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
@@ -1573,6 +1554,28 @@ export default function DeloScreen() {
                   </View>
                 );
               })()}
+              <Text style={[styles.sectionTitle, { color: colors.muted }]}>ПОВТОР</Text>
+              <View style={styles.row}>
+                {([
+                  ['none', 'Не повторять'],
+                  ['daily', 'Каждый день'],
+                  ['weekdays', 'Будни'],
+                  ['weekly', 'Раз в неделю'],
+                ] as const).map(([rule, label]) => {
+                  const active = (editingTask?.repeatRule ?? 'none') === rule;
+                  return (
+                    <Pressable
+                      key={rule}
+                      onPress={() => {
+                        if (!editingTaskId) return;
+                        setTaskRepeatRule(editingTaskId, rule);
+                      }}
+                      style={[styles.chip, { backgroundColor: active ? colors.accent : colors.surface }]}>
+                      <Text style={{ color: active ? '#fff' : colors.text }}>{label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
               <Text style={{ color: pickerLabelColor, fontSize: 12, marginTop: 4 }}>
                 Выберите день и время ниже, затем нажмите «Напомнить».
               </Text>
@@ -1747,96 +1750,34 @@ export default function DeloScreen() {
                 </View>
               )}
 
-              </NestableScrollContainer>
+              </EditScrollContainer>
             </View>
           </View>
         </Modal>
 
-        {/* Delete confirm — по центру экрана */}
-        <Modal visible={!!confirmDeleteTaskId} animationType="fade" transparent onRequestClose={() => setConfirmDeleteTaskId(null)}>
-          <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center' }]}>
-            <View style={[styles.confirmBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' }}>Задачу нельзя будет восстановить.</Text>
-              <Text style={{ color: colors.text, fontSize: 16, marginTop: 8 }}>Удалить?</Text>
-              <View style={[styles.row, { marginTop: 14 }]}>
-                <Pressable onPress={confirmDelete} style={[styles.primaryBtn, { backgroundColor: colors.overdue, flex: 1 }]}>
-                  <Text style={{ color: '#fff' }}>Удалить</Text>
-                </Pressable>
-                <Pressable onPress={() => setConfirmDeleteTaskId(null)} style={[styles.primaryBtn, { backgroundColor: colors.surface2, flex: 1 }]}>
-                  <Text style={{ color: colors.text }}>Отмена</Text>
-                </Pressable>
-              </View>
-              <Pressable onPress={() => setDontAskDeleteAgain((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 14, gap: 8 }}>
-                <Text style={{ color: colors.text }}>{dontAskDeleteAgain ? '☑' : '☐'}</Text>
-                <Text style={{ color: colors.text }}>Больше не спрашивать (3 дня)</Text>
-              </Pressable>
-            </View>
-          </View>
-        </Modal>
+        <ConfirmDeleteModal
+          visible={!!confirmDeleteTaskId}
+          colors={colors}
+          dontAskDeleteAgain={dontAskDeleteAgain}
+          onConfirm={confirmDelete}
+          onCancel={() => setConfirmDeleteTaskId(null)}
+          onToggleDontAsk={() => setDontAskDeleteAgain((v) => !v)}
+        />
 
-        {/* Перенос на завтра: кнопка «Завтра» + варианты с напоминанием */}
-        <Modal visible={!!postponeModalTaskId} animationType="fade" transparent onRequestClose={() => setPostponeModalTaskId(null)}>
-          <View style={styles.modalOverlay}>
-            <View style={[styles.confirmBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' }}>
-                {postponeTask?.reminderAt ? 'У дела есть напоминание сегодня' : 'Перенести на завтра?'}
-              </Text>
-              <Text style={{ color: colors.muted, marginTop: 8 }}>
-                {postponeTask?.reminderAt
-                  ? 'Если перенести дело на завтра, что сделать с напоминанием?'
-                  : 'Дело будет перенесено на завтра.'}
-              </Text>
-              <Pressable
-                onPress={() => {
-                  if (postponeTask) {
-                    postponeToTomorrow(postponeTask.id);
-                    const ts = postponeTask.reminderAt;
-                    if (ts) {
-                      const d = new Date(ts);
-                      d.setDate(d.getDate() + 1);
-                      setTaskReminder(postponeTask.id, d.getTime());
-                    }
-                  }
-                  setPostponeModalTaskId(null);
-                }}
-                style={[styles.primaryBtn, { backgroundColor: colors.accent, marginTop: 14 }]}>
-                <Text style={{ color: '#fff', fontWeight: '700' }}>Завтра</Text>
-              </Pressable>
-              {postponeTask?.reminderAt ? (
-                <View style={[styles.row, { marginTop: 10 }]}>
-                  <Pressable
-                    onPress={() => {
-                      if (postponeTask) postponeToTomorrow(postponeTask.id);
-                      setPostponeModalTaskId(null);
-                    }}
-                    style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                    <Text style={{ color: colors.text }}>Только дело</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      if (postponeTask) {
-                        setEditingTaskId(postponeTask.id);
-                        setReminderPickerOpen(true);
-                        setReminderAndroidMode('date');
-                      }
-                      setPostponeModalTaskId(null);
-                    }}
-                    style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}>
-                    <Text style={{ color: colors.text }}>Изменить</Text>
-                  </Pressable>
-                </View>
-              ) : null}
-            </View>
-          </View>
-        </Modal>
+        <PostponeTaskModal
+          task={postponeTask}
+          colors={colors}
+          onClose={() => setPostponeModalTaskId(null)}
+          onPostponeTask={postponeToTomorrow}
+          onSetReminder={setTaskReminder}
+          onEditReminder={(taskId) => {
+            setEditingTaskId(taskId);
+            setReminderPickerOpen(true);
+            setReminderAndroidMode('date');
+          }}
+        />
 
-        {thankYouVisible && (
-          <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]} pointerEvents="none">
-            <View style={{ backgroundColor: colors.accent, paddingVertical: 12, paddingHorizontal: 24, borderRadius: 999 }}>
-              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Отлично!</Text>
-            </View>
-          </View>
-        )}
+        <ThankYouToast visible={thankYouVisible} accentColor={colors.accent} />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1887,6 +1828,7 @@ const styles = StyleSheet.create({
   body: { flex: 1 },
   searchWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
   search: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
+  hiddenSwipeAction: { width: 1, opacity: 0 },
   taskRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1907,6 +1849,17 @@ const styles = StyleSheet.create({
   taskMeta: { fontSize: 12 },
   taskRowActions: { flexShrink: 0, alignItems: 'flex-end', justifyContent: 'flex-start', paddingTop: 2, maxWidth: '34%' },
   tomorrowChip: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 12, minHeight: 38, justifyContent: 'center' },
+  focusChip: {
+    minWidth: 38,
+    minHeight: 34,
+    paddingHorizontal: 9,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: 6,
+  },
   smallBtn: { paddingHorizontal: 8, paddingVertical: 6, borderRadius: 10 },
   empty: { padding: 24, alignItems: 'center', gap: 10 },
   emptyTitle: { fontSize: 16, fontWeight: '700', textAlign: 'center' },
@@ -1929,15 +1882,6 @@ const styles = StyleSheet.create({
   addBtn: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   modalSheet: { maxHeight: '88%', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 16 },
-  calendarSheet: { paddingHorizontal: 20, paddingVertical: 16 },
-  calendarListWrap: { flex: 1, alignItems: 'center', width: '100%', minHeight: 320 },
-  calendarListOuter: {
-    width: Math.floor(Dimensions.get('window').width) - 48,
-    maxWidth: '100%',
-    height: Math.max(320, Dimensions.get('window').height * 0.45),
-  },
-  calendarListInner: { marginHorizontal: 0, maxWidth: '100%' },
-  calendarLegend: { paddingTop: 8, paddingBottom: 8, gap: 6 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   modalTitle: { fontSize: 18, fontWeight: '800' },
   sectionTitle: { marginTop: 12, marginBottom: 8, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
@@ -1947,4 +1891,3 @@ const styles = StyleSheet.create({
   editInput: { minHeight: 120, borderRadius: 14, padding: 12 },
   confirmBox: { padding: 16, margin: 16, borderRadius: 16, borderWidth: 1 },
 });
-

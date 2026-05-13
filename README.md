@@ -4,6 +4,18 @@
 
 ---
 
+## Что сейчас является основным проектом
+
+**Главное приложение для App Store / Play Market — `mobile-expo/`.**
+
+Корневые Vite/Capacitor-файлы (`src/`, `android/`, `ios/`, `capacitor.config.json`) оставлены как web/legacy-направление. Папка `frontend/` помечена как legacy-копия. Новые мобильные функции, багфиксы и релизные правки нужно вносить в `mobile-expo/`.
+
+Быстрая проверка всего проекта из корня:
+
+```bash
+npm run verify
+```
+
 ## Мобильное приложение (App Store / Play Market) — React Native Expo
 
 **Приложение для публикации в магазинах — это React Native Expo**, не Vite и не Capacitor. Оно находится в папке **`mobile-expo/`**.
@@ -23,7 +35,7 @@
 
 ---
 
-## MVP (текущая версия)
+## MVP web/legacy-версии
 
 - **Без регистрации** — все данные в локальном хранилище браузера (localStorage).
 - Создание задачи одним вводом и Enter.
@@ -37,7 +49,7 @@
 - Уведомление в 21:00: «У тебя N невыполненных дел за сегодня».
 - Светлая / тёмная тема + авто по системе.
 
-**Сборка под Android и список папок:** см. **[ЗАПУСК_И_СБОРКА.md](ЗАПУСК_И_СБОРКА.md)**. В корне DeloApp: `run.bat` или `.\run.ps1`, затем `открыть_android_studio.bat`.
+Для актуального мобильного приложения используйте инструкции из **[mobile-expo/README.md](mobile-expo/README.md)**. Старые инструкции по Capacitor/Android Studio относятся к legacy-направлению.
 
 ## Запуск (разработка)
 
@@ -72,10 +84,11 @@ npm run build
 
 ## Перед публикацией в Play Market / App Store
 
-1. Соберите приложение: в корне запустите **run.bat** (или `.\run.ps1`).
-2. Откройте **frontend/android** в Android Studio → Build → Generate Signed Bundle / APK.
-3. **iOS (Xcode):** если собираете на Mac — см. **[ЧТО_ДЕЛАТЬ_ДАЛЬШЕ.md](ЧТО_ДЕЛАТЬ_ДАЛЬШЕ.md)**. Если передаёте код с Windows на Mac через GitHub — **[ПЕРЕДАЧА_НА_ВЫКЛАДКУ_IOS.md](ПЕРЕДАЧА_НА_ВЫКЛАДКУ_IOS.md)**.
-4. Чек-листы и требования: **[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)**, **[PUBLISH_GUIDE.md](PUBLISH_GUIDE.md)**, **[STORE_READINESS.md](STORE_READINESS.md)**.
+1. Перейдите в `mobile-expo/`.
+2. Выполните `npm install`, если зависимости ещё не установлены.
+3. Выполните `npm run lint`, `npm run typecheck`, `npm test` или из корня `npm run verify`.
+4. Для Android используйте `npm run android` / `npm run android:bundle` и инструкции из **[mobile-expo/README.md](mobile-expo/README.md)**.
+5. Старые чек-листы Capacitor могут быть полезны как справочные, но не являются главным релизным путём.
 
 ## Расширяемость
 
@@ -84,15 +97,16 @@ npm run build
 
 ## Структура проекта
 
-- `frontend/` — приложение «Дело» (React + Vite + Capacitor).
-- `frontend/android/` — проект для Android Studio (сборка APK/AAB).
-- `frontend/ios/` — проект для Xcode (сборка для App Store).
+- `mobile-expo/` — основное приложение «Дело» для App Store / Play Market (Expo, React Native, TypeScript).
+- `src/` — web/legacy-версия на React + Vite.
+- `android/`, `ios/`, `capacitor.config.json` — legacy Capacitor-обвязка для web-версии.
+- `frontend/` — вложенный git-репозиторий и legacy-копия старой структуры, см. `FRONTEND_LEGACY.md`.
 - `landing/` — лендинг и политика конфиденциальности (privacy.html).
 - `app/` — зарезервировано под бэкенд (Laravel).
-- `docker-compose.yml` — запуск фронтенда в режиме разработки.
+- `docker-compose.yml` — запуск web/legacy-фронтенда в режиме разработки.
 
 ## Следующий этап (позже)
 
-- **Синхронизация с сервером или другим устройством** — структура готова: данные проходят через `getTasks`/`saveTasks` (frontend), бэкенд в `app/` (Laravel), API-маршруты можно добавить в `app/routes/api.php`. Подробно: **[SYNC_READINESS.md](SYNC_READINESS.md)**.
+- **Синхронизация с сервером или другим устройством** — начинать с `mobile-expo/src/lib/storage.ts` и бэкенда в `app/` (Laravel), API-маршруты можно добавить в `app/routes/api.php`. Подробно: **[SYNC_READINESS.md](SYNC_READINESS.md)**.
 - Веб-версия + аккаунт (логин/регистрация для sync).
 - Вкладки «Просроченные» и «Выполненные за 7 дней».

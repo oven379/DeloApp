@@ -6,6 +6,8 @@ node_modules/
 frontend/dist/
 dist/
 app/vendor/
+mobile-expo/.expo/
+mobile-expo/.test-build/
 
 # IDE
 .idea/
@@ -40,12 +42,17 @@ app/storage/framework/views/*
 frontend/android/build/
 frontend/android/app/build/
 frontend/android/.gradle/
+mobile-expo/android/build/
+mobile-expo/android/app/build/
+mobile-expo/android/.gradle/
+mobile-expo/android/app/.cxx/
 *.apk
 *.aab
 
 # iOS
 frontend/ios/App/App/build/
 frontend/ios/App/build/
+mobile-expo/ios/build/
 *.ipa
 
 # Локальные скрипты обрезки скриншотов (при необходимости: npm install в папке)

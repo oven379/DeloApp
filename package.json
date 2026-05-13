@@ -11,6 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "verify": "npm run build && npm --prefix mobile-expo run lint && npm --prefix mobile-expo run typecheck && npm --prefix mobile-expo test",
     "refresh": "vite build && vite preview",
     "sync": "npm run build && npx cap sync",
     "cap:sync": "npm run build && npx cap sync",
