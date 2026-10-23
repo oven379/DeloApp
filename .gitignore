@@ -57,3 +57,6 @@ mobile-expo/ios/build/
 
 # Локальные скрипты обрезки скриншотов (при необходимости: npm install в папке)
 landing/screenshots/node_modules/
+
+# landing: APK для скачивания с сайта
+!landing/delo.apk
