@@ -1,4 +1,5 @@
-import type { DayStr, RepeatRule, Subtask, Task } from '../types';
+import type { DayStr, Subtask, Task } from '../types';
+export { getRepeatLabel, formatDayStr, formatTaskDate } from './format';
 
 export function dayStrFromDateLocal(date: Date): DayStr {
   const y = date.getFullYear();
@@ -158,19 +159,13 @@ export function createNextRepeatedTask(task: Task, now = Date.now()): Task | nul
   };
 }
 
-export function getRepeatLabel(rule?: RepeatRule | null) {
-  if (rule === 'daily') return 'каждый день';
-  if (rule === 'weekdays') return 'по будням';
-  if (rule === 'weekly') return 'раз в неделю';
-  return 'не повторять';
-}
-
 /** Переносит невыполненные задачи с прошлых дней на сегодня с пометкой просрочки */
 export function rolloverTasks(tasks: Task[]): Task[] {
   const today = todayStr();
   let changed = false;
   const next = tasks.map((t) => {
     if (t.completedAt) return t;
+    if (t.repeatRule && t.repeatRule !== 'none') return t;
     if (t.forDay < today) {
       changed = true;
       return {
@@ -193,24 +188,13 @@ export function getTodayStats(tasks: Task[]) {
   return { total: forToday.length, done: completed.length, overdue };
 }
 
+export function getPendingTodayCount(tasks: Task[], today: DayStr = todayStr()): number {
+  return tasks.filter((t) => t.forDay === today && t.completedAt == null).length;
+}
+
 export function getDayStats(tasks: Task[], dayStr: DayStr) {
   const forDay = tasks.filter((t) => t.forDay === dayStr);
   const completed = forDay.filter((t) => t.completedAt != null);
   return { total: forDay.length, done: completed.length, overdue: 0 };
 }
 
-export function formatDayStr(dayStr: string) {
-  if (!dayStr || dayStr.length < 10) return dayStr;
-  const [y, m, d] = dayStr.split('-');
-  return `${d}.${m}.${y.slice(2)}`;
-}
-
-export function formatTaskDate(ts: number) {
-  const d = new Date(ts);
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = String(d.getFullYear()).slice(2);
-  const h = String(d.getHours()).padStart(2, '0');
-  const m = String(d.getMinutes()).padStart(2, '0');
-  return `${day}.${month}.${year} · ${h}:${m}`;
-}

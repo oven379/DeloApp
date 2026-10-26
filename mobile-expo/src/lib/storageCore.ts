@@ -1,6 +1,6 @@
 import type { DailyNotificationSlot, DayStr, ListMode, RepeatRule, Settings, Task, ThemeSetting } from '../types';
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
 
 export const DEFAULT_DAILY: DailyNotificationSlot[] = [
   { enabled: true, hour: 9, minute: 0, text: 'Проверь свои планы на сегодня. Хорошего тебе дня)' },
@@ -17,6 +17,14 @@ export const DEFAULT_SETTINGS: Settings = {
   dailyNotifications: DEFAULT_DAILY,
   editorFontSize: 15,
 };
+
+function localDateStr(ts: number): DayStr {
+  const d = new Date(ts);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}` as DayStr;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -66,11 +74,13 @@ export function normalizeSettings(raw: unknown, now = Date.now()): Settings {
     listMode,
     headerTabsStyle,
     skipDeleteConfirmUntil:
-      typeof parsed.skipDeleteConfirm === 'boolean'
-        ? parsed.skipDeleteConfirm
-          ? now + SKIP_DELETE_CONFIRM_DAYS * 24 * 60 * 60 * 1000
-          : null
-        : skipDeleteConfirmUntil,
+      skipDeleteConfirmUntil !== null
+        ? skipDeleteConfirmUntil
+        : typeof parsed.skipDeleteConfirm === 'boolean'
+          ? parsed.skipDeleteConfirm
+            ? now + SKIP_DELETE_CONFIRM_DAYS * 24 * 60 * 60 * 1000
+            : null
+          : null,
     dailyNotifications: [
       normalizeDailySlot(daily[0], DEFAULT_DAILY[0]),
       normalizeDailySlot(daily[1], DEFAULT_DAILY[1]),
@@ -83,7 +93,7 @@ function normalizeTask(value: unknown, index: number, now = Date.now()): Task | 
   if (!isRecord(value)) return null;
   const text = typeof value.text === 'string' ? value.text : '';
   const createdAt = typeof value.createdAt === 'number' && Number.isFinite(value.createdAt) ? value.createdAt : now;
-  const forDay = isDayStr(value.forDay) ? value.forDay : (new Date(createdAt).toISOString().slice(0, 10) as DayStr);
+  const forDay = isDayStr(value.forDay) ? value.forDay : localDateStr(createdAt);
   const subtasks = Array.isArray(value.subtasks)
     ? value.subtasks
         .filter(isRecord)

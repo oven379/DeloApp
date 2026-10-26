@@ -6,26 +6,25 @@ export type Subtask = {
   done: boolean;
 };
 
+export type RepeatRule = 'none' | 'daily' | 'weekdays' | 'weekly';
+
 export type Task = {
   id: string;
   text: string;
   createdAt: number;
-  /** Последнее изменение текста/напоминания (если было) */
-  updatedAt?: number | null;
+  updatedAt: number | null;
   forDay: DayStr;
   completedAt: number | null;
   isOverdue: boolean;
+  /** Устанавливается только при переносе просроченной задачи — хранит исходный день */
   originalForDay?: DayStr;
-  order?: number;
+  order: number;
   reminderAt: number | null;
-  subtasks?: Subtask[];
-  /** 1-3 means task is pinned into "focus of the day"; null/undefined means ordinary task. */
-  focusRank?: number | null;
-  repeatRule?: RepeatRule | null;
-  repeatSourceId?: string | null;
+  subtasks: Subtask[];
+  focusRank: number | null;
+  repeatRule: RepeatRule;
+  repeatSourceId: string | null;
 };
-
-export type RepeatRule = 'none' | 'daily' | 'weekdays' | 'weekly';
 
 export type DailyNotificationSlot = {
   enabled: boolean;
@@ -45,5 +44,5 @@ export type Settings = {
   headerTabsStyle: HeaderTabsStyle;
   skipDeleteConfirmUntil: number | null;
   dailyNotifications: DailyNotificationSlot[];
-  editorFontSize?: number;
+  editorFontSize: number;
 };

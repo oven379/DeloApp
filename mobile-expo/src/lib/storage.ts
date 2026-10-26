@@ -1,7 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Settings, Task } from '../types';
 import {
-  CURRENT_SCHEMA_VERSION,
   DEFAULT_SETTINGS,
   SKIP_DELETE_CONFIRM_DAYS,
   normalizeSettings,
@@ -10,7 +9,6 @@ import {
 
 const TASKS_KEY = 'delo_tasks';
 const SETTINGS_KEY = 'delo_settings';
-const STORAGE_SCHEMA_KEY = 'delo_storage_schema_version';
 
 export { DEFAULT_SETTINGS };
 
@@ -22,7 +20,6 @@ export async function getTasks(): Promise<Task[]> {
     if (raw && JSON.stringify(parsed) !== JSON.stringify(tasks)) {
       await saveTasks(tasks);
     }
-    await AsyncStorage.setItem(STORAGE_SCHEMA_KEY, String(CURRENT_SCHEMA_VERSION));
     return tasks;
   } catch {
     return [];
@@ -31,7 +28,6 @@ export async function getTasks(): Promise<Task[]> {
 
 export async function saveTasks(tasks: Task[]): Promise<void> {
   await AsyncStorage.setItem(TASKS_KEY, JSON.stringify(normalizeTasks(tasks)));
-  await AsyncStorage.setItem(STORAGE_SCHEMA_KEY, String(CURRENT_SCHEMA_VERSION));
 }
 
 export async function getSettings(): Promise<Settings> {
@@ -42,7 +38,6 @@ export async function getSettings(): Promise<Settings> {
     if (raw && JSON.stringify(parsed) !== JSON.stringify(settings)) {
       await saveSettings(settings);
     }
-    await AsyncStorage.setItem(STORAGE_SCHEMA_KEY, String(CURRENT_SCHEMA_VERSION));
     return settings;
   } catch {
     return { ...DEFAULT_SETTINGS };
@@ -55,5 +50,4 @@ export function getSkipDeleteConfirmUntil() {
 
 export async function saveSettings(settings: Settings): Promise<void> {
   await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(normalizeSettings(settings)));
-  await AsyncStorage.setItem(STORAGE_SCHEMA_KEY, String(CURRENT_SCHEMA_VERSION));
 }

@@ -1,8 +1,8 @@
 import * as Notifications from 'expo-notifications';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import * as Haptics from 'expo-haptics';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Constants from 'expo-constants';
 import {
-  AppState,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -26,13 +26,13 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 
-import type { DayStr, RepeatRule, Settings, Subtask, Task } from '../src/types';
+import type { DayStr, RepeatRule, Subtask, Task } from '../src/types';
 import { CalendarModal } from '../src/components/CalendarModal';
 import { ConfirmDeleteModal } from '../src/components/ConfirmDeleteModal';
 import { PostponeTaskModal } from '../src/components/PostponeTaskModal';
 import { ThankYouToast } from '../src/components/ThankYouToast';
 import { type DayView, formatHeaderDate, isDayStr, isPastDayStr, taskSortKey } from '../src/lib/dayView';
-import { DEFAULT_SETTINGS, getSettings, getSkipDeleteConfirmUntil, getTasks, saveSettings, saveTasks } from '../src/lib/storage';
+import { getSkipDeleteConfirmUntil } from '../src/lib/storage';
 import { parseLinksAndPhones } from '../src/lib/textSegments';
 import { useResolvedTheme } from '../hooks/use-resolved-theme';
 import {
@@ -43,15 +43,18 @@ import {
   deleteSubtaskFromTask,
   getCurrentDayStr,
   getDayStats,
-  getRepeatLabel,
   getTodayStats,
-  rolloverTasks,
   todayStr,
   toggleSubtaskInTask,
   tomorrowStr,
-  updateSubtaskInTask,
 } from '../src/lib/tasks';
-import { disableOverdueReminders, requestPermissions, syncDailyNotifications, syncTaskReminders } from '../src/lib/notifications';
+import { formatDayStr, formatTaskDate, getRepeatLabel } from '../src/lib/format';
+import { useAppInit } from '../hooks/useAppInit';
+import { useSubtaskEditing } from '../hooks/useSubtaskEditing';
+import { useTaskEditing } from '../hooks/useTaskEditing';
+import { useNotificationSync } from '../hooks/useNotificationSync';
+
+type GlobalSearchItem = { kind: 'header'; day: DayStr } | { kind: 'task'; task: Task };
 
 const WEEKDAY_SHORT = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
 const IS_NATIVE_NOTIFICATIONS = Platform.OS === 'ios' || Platform.OS === 'android';
@@ -59,8 +62,6 @@ const IS_NATIVE_NOTIFICATIONS = Platform.OS === 'ios' || Platform.OS === 'androi
 export default function DeloScreen() {
   const insets = useSafeAreaInsets();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [settings, setSettingsState] = useState<Settings | null>(null);
   const [dayView, setDayView] = useState<DayView>('today');
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -68,15 +69,12 @@ export default function DeloScreen() {
   const newTaskTextRef = useRef('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
-  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState('');
-  const [subtaskDraft, setSubtaskDraft] = useState('');
-  const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null);
-  const [subtaskEditDraft, setSubtaskEditDraft] = useState('');
-  const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
-  const [reminderTemp, setReminderTemp] = useState<Date>(new Date());
-  const [showPastReminderWarning, setShowPastReminderWarning] = useState(false);
-  const [reminderAndroidMode, setReminderAndroidMode] = useState<'date' | 'time'>('date');
+  const [searchGlobal, setSearchGlobal] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
   const [dailyTimePickerIdx, setDailyTimePickerIdx] = useState<number | null>(null);
   const [dailyTimeTemp, setDailyTimeTemp] = useState<Date>(new Date());
   const [postponeModalTaskId, setPostponeModalTaskId] = useState<string | null>(null);
@@ -89,8 +87,48 @@ export default function DeloScreen() {
   const [thankYouVisible, setThankYouVisible] = useState(false);
 
   const addInputRef = useRef<TextInput>(null);
-  const editingTaskIdRef = useRef<string | null>(null);
-  const tasksRef = useRef<Task[]>([]);
+  const thankYouTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => { if (thankYouTimerRef.current) clearTimeout(thankYouTimerRef.current); };
+  }, []);
+
+  // handleNotificationOpen использует setDayView и setEditingTaskId — форвардим через ref,
+  // чтобы useAppInit получил стабильный колбэк без circular dependency.
+  const handleNotificationOpenRef = useRef<(r: Notifications.NotificationResponse | null | undefined) => void>(() => {});
+
+  const { tasks, setTasks, settings, setSettingsState, tasksRef, dailySlotsRef } = useAppInit({
+    onNotificationOpen: (r) => handleNotificationOpenRef.current(r),
+    isNative: IS_NATIVE_NOTIFICATIONS,
+  });
+
+  const updateTask = useCallback((id: string, text: string) => {
+    const nextText = text.trim();
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        if ((t.text || '').trim() === nextText) return t;
+        return { ...t, text: nextText, isOverdue: false, updatedAt: Date.now() };
+      })
+    );
+  }, [setTasks]);
+
+  const {
+    editingSubtaskId, subtaskEditDraft, setSubtaskEditDraft,
+    startSubtaskEdit, cancelSubtaskEdit, saveSubtaskEdit,
+  } = useSubtaskEditing({ setTasks });
+
+  const {
+    editingTask, editingTaskId, setEditingTaskId, editingTaskIdRef,
+    editDraft, setEditDraft,
+    subtaskDraft, setSubtaskDraft,
+    reminderPickerOpen, setReminderPickerOpen,
+    reminderTemp,
+    showPastReminderWarning, setShowPastReminderWarning,
+    reminderAndroidMode, setReminderAndroidMode,
+    setReminderTempByUser, closeEditModal,
+  } = useTaskEditing({ tasks, updateTask, cancelSubtaskEdit });
+
+  useNotificationSync({ tasks, settings, tasksRef, dailySlotsRef });
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
@@ -112,25 +150,12 @@ export default function DeloScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    editingTaskIdRef.current = editingTaskId;
-  }, [editingTaskId]);
-
   function formatTimeAMPM(hour: number, minute: number) {
     const h = hour % 12 || 12;
     const m = String(minute).padStart(2, '0');
     return hour < 12 ? `${h}:${m} AM` : `${h}:${m} PM`;
   }
 
-  function formatTaskDateTime(ts: number) {
-    const d = new Date(ts);
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = String(d.getFullYear()).slice(-2);
-    const h = String(d.getHours()).padStart(2, '0');
-    const m = String(d.getMinutes()).padStart(2, '0');
-    return `${day}.${month}.${year} · ${h}:${m}`;
-  }
 
   const handleNotificationOpen = (response: Notifications.NotificationResponse | null | undefined) => {
     if (!response) return;
@@ -151,50 +176,16 @@ export default function DeloScreen() {
     setPostponeModalTaskId(null);
 
     if (taskId) {
-      // Если задача уже есть в стейте — переключим вкладку на её день,
-      // чтобы пользователь видел задачу в правильном контексте.
       const t = tasksRef.current.find((x) => x.id === taskId);
       if (t?.forDay) setDayView(t.forDay);
       setEditingTaskId(taskId);
     } else {
-      // For non-task notifications: open main tasks view.
       setEditingTaskId(null);
       setDayView('today');
     }
   };
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const [t0, s0] = await Promise.all([getTasks(), getSettings()]);
-        if (cancelled) return;
-        const rolled = rolloverTasks(t0);
-        if (rolled !== t0) await saveTasks(rolled);
-        setTasks(rolled);
-        setSettingsState(s0);
-
-        if (IS_NATIVE_NOTIFICATIONS) {
-          // Только запрашиваем разрешения при первом запуске. Синхронизацию напоминаний делает эффект ниже.
-          // Также отключаем устаревшие "просроченные" уведомления (если были запланированы в прошлых версиях).
-          requestPermissions()
-            .then(() => disableOverdueReminders())
-            .catch((e) => console.warn('[notifications] init failed', e));
-
-          const response = await Notifications.getLastNotificationResponseAsync();
-          if (!cancelled) handleNotificationOpen(response);
-        }
-      } catch {
-        if (!cancelled) {
-          setTasks([]);
-          setSettingsState({ ...DEFAULT_SETTINGS });
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Присваиваем после объявления, чтобы useAppInit (onNotificationOpen) всегда вызывал актуальную версию.
+  handleNotificationOpenRef.current = handleNotificationOpen;
 
   const resolvedTheme = useResolvedTheme(settings?.theme ?? 'dark');
   const colors = resolvedTheme === 'dark' ? DARK : LIGHT;
@@ -212,19 +203,32 @@ export default function DeloScreen() {
   const dateTimePickerTextColor = resolvedTheme === 'dark' ? '#e5e7eb' : '#111827';
   const EditScrollContainer = Platform.OS === 'web' ? ScrollView : NestableScrollContainer;
 
+  function formatTimeUntil(reminderAt: number): string {
+    const diff = reminderAt - now;
+    const rd = new Date(reminderAt);
+    const hhmm = `${String(rd.getHours()).padStart(2, '0')}:${String(rd.getMinutes()).padStart(2, '0')}`;
+    if (diff <= 0) return hhmm;
+    const mins = Math.floor(diff / 60_000);
+    const hours = Math.floor(diff / 3_600_000);
+    const days = Math.floor(diff / 86_400_000);
+    if (mins < 60) return `через ${mins} мин`;
+    if (hours < 24) return `сегодня в ${hhmm} (через ${hours} ч)`;
+    if (days === 1) return `завтра в ${hhmm}`;
+    return `${formatDayStr(dayStrFromDateLocal(rd))} в ${hhmm}`;
+  }
+
   function renderTaskDatesMeta(item: Task) {
+    const reminderFired = item.reminderAt != null && item.reminderAt <= now;
     const reminderLineColor =
       item.reminderAt == null
         ? colors.muted
-        : item.completedAt
+        : item.completedAt || reminderFired
           ? colors.muted
-          : item.reminderAt <= Date.now()
-            ? colors.overdue
-            : colors.accent;
+          : colors.accent;
 
     return (
       <View style={{ alignSelf: 'stretch', gap: 2 }}>
-        <Text style={[styles.taskMeta, { color: colors.muted }]}>Создано: {formatTaskDateTime(item.createdAt)}</Text>
+        <Text style={[styles.taskMeta, { color: colors.muted }]}>Создано: {formatTaskDate(item.createdAt)}</Text>
         {item.focusRank ? (
           <Text style={[styles.taskMeta, { color: colors.accent }]}>Фокус дня #{item.focusRank}</Text>
         ) : null}
@@ -232,43 +236,13 @@ export default function DeloScreen() {
           <Text style={[styles.taskMeta, { color: colors.muted }]}>Повтор: {getRepeatLabel(item.repeatRule)}</Text>
         ) : null}
         {item.reminderAt != null ? (
-          <Text style={[styles.taskMeta, { color: reminderLineColor }]}>Напоминание: {formatTaskDateTime(item.reminderAt)}</Text>
+          <Text style={[styles.taskMeta, { color: reminderLineColor }]}>
+            {reminderFired ? '🔔 ' : '⏰ '}{formatTimeUntil(item.reminderAt)}
+          </Text>
         ) : null}
       </View>
     );
   }
-
-  useEffect(() => {
-    if (!settings) return;
-    saveSettings(settings).catch(() => {});
-  }, [settings]);
-
-  useEffect(() => {
-    saveTasks(tasks).catch(() => {});
-  }, [tasks]);
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', async (state) => {
-      if (state !== 'active') return;
-      // При возвращении в приложение — очистим бейдж и пересинхронизируем напоминания (после перезагрузки/обновлений).
-      if (IS_NATIVE_NOTIFICATIONS) Notifications.setBadgeCountAsync(0).catch(() => {});
-      setTasks((prev) => {
-        const rolled = rolloverTasks(prev);
-        if (rolled !== prev) {
-          saveTasks(rolled).catch(() => {});
-          return rolled;
-        }
-        return prev;
-      });
-      // If app became active after tapping a notification, open task/main view accordingly.
-      if (IS_NATIVE_NOTIFICATIONS) {
-        Notifications.getLastNotificationResponseAsync()
-          .then((response) => handleNotificationOpen(response))
-          .catch(() => {});
-      }
-    });
-    return () => sub.remove();
-  }, []);
 
   // Лисенеры уведомлений: пополняем список "Уведомления" внутри приложения.
   useEffect(() => {
@@ -283,9 +257,6 @@ export default function DeloScreen() {
           ? prev
           : [...prev, { id: `rem_${requestId}_${now}`, requestId, taskId, text, firedAt: now }]
       );
-      Notifications.getBadgeCountAsync()
-        .then((c) => Notifications.setBadgeCountAsync((c ?? 0) + 1))
-        .catch(() => {});
     });
     const sub2 = Notifications.addNotificationResponseReceivedListener((r) => {
       handleNotificationOpen(r);
@@ -295,33 +266,6 @@ export default function DeloScreen() {
       sub2.remove();
     };
   }, []);
-
-  // Синхронизацию уведомлений делаем только когда реально меняются напоминания/задачи,
-  // а не при любом изменении настроек (например, переключение темы/вида списка).
-  const tasksSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dailySyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const taskRemindersKey = useMemo(() => {
-    // Достаточно id/reminderAt — тема/вид списка сюда не входят.
-    return (tasks || []).map((t) => `${t.id}:${t.reminderAt ?? 0}`).join('|');
-  }, [tasks]);
-
-  const dailyNotificationsKey = useMemo(() => {
-    const list = settings?.dailyNotifications ?? [];
-    return list.map((s) => `${s.enabled ? 1 : 0}:${s.hour ?? 0}:${s.minute ?? 0}:${s.text ?? ''}`).join('|');
-  }, [settings?.dailyNotifications]);
-
-  const settingsReady = !!settings;
-
-  const dailySlotsRef = useRef<Settings['dailyNotifications']>([]);
-
-  useEffect(() => {
-    tasksRef.current = tasks;
-  }, [tasks]);
-
-  useEffect(() => {
-    dailySlotsRef.current = settings?.dailyNotifications ?? [];
-  }, [settings?.dailyNotifications]);
 
   const openFromInAppNotification = (n: {
     requestId: string;
@@ -348,32 +292,6 @@ export default function DeloScreen() {
       setDayView('today');
     }
   };
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    if (tasksSyncRef.current) clearTimeout(tasksSyncRef.current);
-    tasksSyncRef.current = setTimeout(() => {
-      // Only task reminders + ensure overdue reminders are disabled.
-      Promise.all([syncTaskReminders(tasksRef.current), disableOverdueReminders()]).catch((e) =>
-        console.warn('[notifications] sync tasks failed', e)
-      );
-    }, 800);
-    return () => {
-      if (tasksSyncRef.current) clearTimeout(tasksSyncRef.current);
-    };
-  }, [taskRemindersKey, settingsReady]);
-
-  useEffect(() => {
-    if (!settingsReady) return;
-    if (dailySyncRef.current) clearTimeout(dailySyncRef.current);
-    dailySyncRef.current = setTimeout(() => {
-      // Daily notifications are fixed to 09:00 and 21:00 inside syncDailyNotifications.
-      syncDailyNotifications(dailySlotsRef.current).catch((e) => console.warn('[notifications] sync daily failed', e));
-    }, 800);
-    return () => {
-      if (dailySyncRef.current) clearTimeout(dailySyncRef.current);
-    };
-  }, [dailyNotificationsKey, settingsReady]);
 
   const currentDayStr = getCurrentDayStr(dayView);
   const canCreateTasksForSelectedDay = !isPastDayStr(currentDayStr);
@@ -444,6 +362,25 @@ export default function DeloScreen() {
     return { incomplete: filter(focusMode ? focused : allInc), completed: focusMode ? [] : filter(done) };
   }, [tasks, currentDayStr, searchQuery, focusMode]);
 
+  const globalSearchItems = useMemo((): GlobalSearchItem[] => {
+    if (!searchGlobal || !searchQuery.trim()) return [];
+    const q = searchQuery.trim().toLowerCase();
+    const matched = tasks.filter((t) => (t.text || '').toLowerCase().includes(q));
+    const byDay = new Map<string, Task[]>();
+    for (const t of matched) {
+      const list = byDay.get(t.forDay) ?? [];
+      list.push(t);
+      byDay.set(t.forDay, list);
+    }
+    const sortedDays = [...byDay.keys()].sort((a, b) => b.localeCompare(a));
+    const items: GlobalSearchItem[] = [];
+    for (const day of sortedDays) {
+      items.push({ kind: 'header', day: day as DayStr });
+      for (const task of byDay.get(day)!) items.push({ kind: 'task', task });
+    }
+    return items;
+  }, [tasks, searchGlobal, searchQuery]);
+
   const addTask = (text: string, forDay?: DayStr) => {
     const day = forDay ?? currentDayStr;
     if (isPastDayStr(day)) return;
@@ -493,8 +430,9 @@ export default function DeloScreen() {
       return [...shifted, repeatedTask];
     });
     if (wasCompleting) {
+      if (thankYouTimerRef.current) clearTimeout(thankYouTimerRef.current);
       setThankYouVisible(true);
-      setTimeout(() => setThankYouVisible(false), 2500);
+      thankYouTimerRef.current = setTimeout(() => setThankYouVisible(false), 2500);
     }
   };
 
@@ -539,19 +477,26 @@ export default function DeloScreen() {
       <Swipeable
         overshootLeft={false}
         overshootRight={false}
-        leftThreshold={56}
-        rightThreshold={48}
+        leftThreshold={64}
+        rightThreshold={64}
         renderLeftActions={() => (
-          <View style={styles.hiddenSwipeAction} />
+          <View style={styles.swipeComplete}>
+            <Ionicons name={item.completedAt ? 'arrow-undo-outline' : 'checkmark'} size={28} color="#fff" />
+          </View>
         )}
         renderRightActions={() => (
-          <View style={styles.hiddenSwipeAction} />
+          <View style={styles.swipeDelete}>
+            <Ionicons name="trash-outline" size={24} color="#fff" />
+          </View>
         )}
         onSwipeableOpen={(direction, swipeable) => {
           swipeable.close();
-          if (direction === 'right') {
+          if (Platform.OS !== 'web') {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+          }
+          if (direction === 'left') {
             toggleTask(item.id);
-          } else if (direction === 'left') {
+          } else if (direction === 'right') {
             deleteTask(item.id);
           }
         }}>
@@ -661,17 +606,6 @@ export default function DeloScreen() {
     );
   };
 
-  const updateTask = (id: string, text: string) => {
-    const nextText = text.trim();
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id !== id) return t;
-        if ((t.text || '').trim() === nextText) return t;
-        return { ...t, text: nextText, isOverdue: false, updatedAt: Date.now() };
-      })
-    );
-  };
-
   const addSubtask = (taskId: string, text: string) => {
     setTasks((prev) => prev.map((t) => (t.id === taskId ? addSubtaskToTask(t, text) : t)));
   };
@@ -680,23 +614,6 @@ export default function DeloScreen() {
     setTasks((prev) =>
       prev.map((t) => (t.id === taskId ? { ...t, subtasks: data, updatedAt: Date.now() } : t))
     );
-  };
-
-  const startSubtaskEdit = (subtask: Subtask) => {
-    setEditingSubtaskId(subtask.id);
-    setSubtaskEditDraft(subtask.text);
-  };
-
-  const cancelSubtaskEdit = () => {
-    setEditingSubtaskId(null);
-    setSubtaskEditDraft('');
-  };
-
-  const saveSubtaskEdit = (taskId: string, subtaskId: string) => {
-    const nextText = subtaskEditDraft.trim();
-    if (!nextText) return;
-    setTasks((prev) => prev.map((t) => (t.id === taskId ? updateSubtaskInTask(t, subtaskId, nextText) : t)));
-    cancelSubtaskEdit();
   };
 
   const toggleSubtask = (taskId: string, subtaskId: string) => {
@@ -804,46 +721,7 @@ export default function DeloScreen() {
     });
   };
 
-  const editingTask = tasks.find((t) => t.id === editingTaskId) || null;
   const postponeTask = tasks.find((t) => t.id === postponeModalTaskId) || null;
-
-  const setReminderTempByUser = (d: Date) => {
-    setReminderTemp(d);
-    setShowPastReminderWarning(d.getTime() <= Date.now());
-  };
-
-  useEffect(() => {
-    if (editingTaskId) {
-      if (!editingTask) {
-        // Сбрасываем только если задачи уже загружены и такой нет (например, удалили). Пока tasks пустой — ждём загрузки, чтобы по тапу уведомления открылась карточка.
-        if (tasks.length > 0) setEditingTaskId(null);
-        return;
-      }
-      setEditDraft(editingTask.text ?? '');
-      setSubtaskDraft('');
-      cancelSubtaskEdit();
-      const base =
-        editingTask.reminderAt && editingTask.reminderAt > Date.now()
-          ? new Date(editingTask.reminderAt)
-          : new Date();
-      setReminderTemp(base);
-      setShowPastReminderWarning(false);
-    } else {
-      setEditDraft('');
-      setSubtaskDraft('');
-      cancelSubtaskEdit();
-      setShowPastReminderWarning(false);
-    }
-  }, [editingTaskId, editingTask, tasks.length]);
-
-  const closeEditModal = () => {
-    if (editingTaskId && editDraft.trim() !== '') {
-      updateTask(editingTaskId, editDraft);
-    }
-    cancelSubtaskEdit();
-    setEditingTaskId(null);
-    setReminderPickerOpen(false);
-  };
 
   const emptyList = (
     <View style={styles.empty}>
@@ -875,11 +753,26 @@ export default function DeloScreen() {
           <Swipeable
             key={t.id}
             overshootLeft={false}
-            leftThreshold={56}
-            renderLeftActions={() => <View style={styles.hiddenSwipeAction} />}
+            overshootRight={false}
+            leftThreshold={64}
+            rightThreshold={64}
+            renderLeftActions={() => (
+              <View style={styles.swipeComplete}>
+                <Ionicons name="arrow-undo-outline" size={24} color="#fff" />
+              </View>
+            )}
+            renderRightActions={() => (
+              <View style={styles.swipeDelete}>
+                <Ionicons name="trash-outline" size={24} color="#fff" />
+              </View>
+            )}
             onSwipeableOpen={(direction, swipeable) => {
               swipeable.close();
-              if (direction === 'left') deleteTask(t.id);
+              if (Platform.OS !== 'web') {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              }
+              if (direction === 'left') toggleTask(t.id);
+              else if (direction === 'right') deleteTask(t.id);
             }}>
             <Pressable
               onPress={() => setEditingTaskId(t.id)}
@@ -974,7 +867,7 @@ export default function DeloScreen() {
                   <Text style={{ color: colors.text, fontWeight: dayView === 'today' ? '700' : '400' }}>
                     {settings.headerTabsStyle === 'short'
                       ? WEEKDAY_SHORT[new Date().getDay()]
-                      : 'Сегодня'}
+                      : 'Сег'}
                   </Text>
                 </Pressable>
                 <Pressable
@@ -983,7 +876,7 @@ export default function DeloScreen() {
                   <Text style={{ color: colors.text, fontWeight: dayView === 'tomorrow' ? '700' : '400' }}>
                     {settings.headerTabsStyle === 'short'
                       ? WEEKDAY_SHORT[(new Date().getDay() + 1) % 7]
-                      : 'Завтра'}
+                      : 'Зав'}
                   </Text>
                 </Pressable>
               </View>
@@ -1026,11 +919,66 @@ export default function DeloScreen() {
               onChangeText={setSearchQuery}
               placeholder="Поиск по делам..."
               placeholderTextColor={colors.muted}
-              style={[styles.search, { backgroundColor: colors.surface, color: colors.text }]}
+              style={[styles.search, { backgroundColor: colors.surface, color: colors.text, flex: 1 }]}
             />
+            <Pressable
+              onPress={() => setSearchGlobal((v) => !v)}
+              style={[
+                styles.globalSearchBtn,
+                { backgroundColor: searchGlobal ? colors.accent : colors.surface },
+              ]}>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: searchGlobal ? '#fff' : colors.muted }}>
+                Везде
+              </Text>
+            </Pressable>
           </View>
 
-          {Platform.OS === 'web' ? (
+          {searchGlobal && searchQuery.trim() ? (
+            <FlatList
+              data={globalSearchItems}
+              keyExtractor={(item) => item.kind === 'header' ? `h_${item.day}` : `t_${item.task.id}`}
+              renderItem={({ item }) => {
+                if (item.kind === 'header') {
+                  return (
+                    <Pressable
+                      onPress={() => { setDayView(item.day); setSearchGlobal(false); setSearchQuery(''); }}
+                      style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: colors.accent, textTransform: 'uppercase' }}>
+                        {formatDayStr(item.day)}
+                      </Text>
+                    </Pressable>
+                  );
+                }
+                return (
+                  <Pressable
+                    onPress={() => setEditingTaskId(item.task.id)}
+                    style={[
+                      styles.taskRow,
+                      listMode === 'compact' ? styles.taskRowCompact : styles.taskRowExpanded,
+                      { backgroundColor: colors.surface, borderColor: item.task.completedAt ? colors.border : item.task.isOverdue ? colors.overdue : colors.border, opacity: item.task.completedAt ? 0.7 : 1 },
+                    ]}>
+                    <View style={[styles.check, styles.checkCompact, { borderColor: checkBorderColor, backgroundColor: checkBgColor }]}>
+                      <Text style={{ color: colors.text }}>{item.task.completedAt ? '✓' : ''}</Text>
+                    </View>
+                    <View style={styles.taskTextCol}>
+                      <Text style={[styles.taskText, { color: colors.text, textDecorationLine: item.task.completedAt ? 'line-through' : 'none' }]} numberOfLines={3}>
+                        {item.task.text}
+                      </Text>
+                      {renderTaskDatesMeta(item.task)}
+                    </View>
+                  </Pressable>
+                );
+              }}
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Text style={[styles.emptyTitle, { color: colors.text }]}>Ничего не найдено</Text>
+                  <Text style={[styles.emptyHint, { color: colors.muted }]}>По запросу «{searchQuery}» нет результатов.</Text>
+                </View>
+              }
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: footerPad }}
+            />
+          ) : Platform.OS === 'web' ? (
             <FlatList
               data={incomplete}
               keyExtractor={(item) => item.id}
@@ -1080,19 +1028,12 @@ export default function DeloScreen() {
             }
             placeholderTextColor={colors.muted}
             editable={canCreateTasksForSelectedDay}
+            multiline
+            numberOfLines={4}
             style={[
               styles.addInput,
               { backgroundColor: colors.surface, color: colors.text, opacity: canCreateTasksForSelectedDay ? 1 : 0.55 },
             ]}
-            onSubmitEditing={(e) => {
-              if (!canCreateTasksForSelectedDay) return;
-              const v = (e.nativeEvent.text ?? newTaskTextRef.current ?? '').trim();
-              if (!v) return;
-              addTask(v);
-              newTaskTextRef.current = '';
-              setNewTaskText('');
-            }}
-            returnKeyType="done"
           />
           <Pressable
             disabled={!canCreateTasksForSelectedDay}
@@ -1104,6 +1045,8 @@ export default function DeloScreen() {
               addTask(v);
               newTaskTextRef.current = '';
               setNewTaskText('');
+              Keyboard.dismiss();
+              addInputRef.current?.blur();
             }}>
             <Text style={{ color: '#fff', fontSize: 22, lineHeight: 22 }}>+</Text>
           </Pressable>
@@ -1186,7 +1129,6 @@ export default function DeloScreen() {
                         <Pressable
                           onPress={() => {
                             setReminderNotifications([]);
-                            Notifications.setBadgeCountAsync(0).catch(() => {});
                           }}
                           style={[styles.primaryBtn, { backgroundColor: colors.surface2 }]}
                         >
@@ -1501,6 +1443,11 @@ export default function DeloScreen() {
                           <Pressable onPress={() => deleteSubtask(taskId, st.id)} hitSlop={10}>
                             <Text style={{ color: colors.muted }}>🗑️</Text>
                           </Pressable>
+                          {drag && !isEditing && (
+                            <Pressable onLongPress={drag} delayLongPress={100} hitSlop={10}>
+                              <Ionicons name="reorder-three-outline" size={20} color={colors.muted} />
+                            </Pressable>
+                          )}
                         </>
                       )}
                     </Pressable>
@@ -1557,7 +1504,6 @@ export default function DeloScreen() {
               <Text style={[styles.sectionTitle, { color: colors.muted }]}>ПОВТОР</Text>
               <View style={styles.row}>
                 {([
-                  ['none', 'Не повторять'],
                   ['daily', 'Каждый день'],
                   ['weekdays', 'Будни'],
                   ['weekly', 'Раз в неделю'],
@@ -1568,7 +1514,7 @@ export default function DeloScreen() {
                       key={rule}
                       onPress={() => {
                         if (!editingTaskId) return;
-                        setTaskRepeatRule(editingTaskId, rule);
+                        setTaskRepeatRule(editingTaskId, active ? 'none' : rule);
                       }}
                       style={[styles.chip, { backgroundColor: active ? colors.accent : colors.surface }]}>
                       <Text style={{ color: active ? '#fff' : colors.text }}>{label}</Text>
@@ -1815,20 +1761,48 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12, borderBottomWidth: 1 },
   headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 },
   title: { fontSize: 28, fontWeight: '800' },
   subtitle: { marginTop: 2, fontSize: 13 },
   tabs: { flexDirection: 'row', borderRadius: 12, overflow: 'hidden', alignSelf: 'flex-start' },
   tab: { minWidth: 68, paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
-  iconBtn: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   progressRow: { marginTop: 10, gap: 6 },
   progressTrack: { height: 8, borderRadius: 999 },
   progressFill: { height: 8, borderRadius: 999 },
   progressText: { fontSize: 12 },
   body: { flex: 1 },
-  searchWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
+  searchWrap: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8, flexDirection: 'row', alignItems: 'center' },
   search: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
   hiddenSwipeAction: { width: 1, opacity: 0 },
+  swipeComplete: {
+    backgroundColor: '#22c55e',
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingHorizontal: 22,
+    marginVertical: 6,
+    marginLeft: 16,
+    borderRadius: 16,
+    minWidth: 72,
+  },
+  swipeDelete: {
+    backgroundColor: '#ef4444',
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    paddingHorizontal: 22,
+    marginVertical: 6,
+    marginRight: 16,
+    borderRadius: 16,
+    minWidth: 72,
+  },
+  globalSearchBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    marginLeft: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   taskRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1878,7 +1852,7 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     borderTopWidth: 1,
   },
-  addInput: { flex: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10 },
+  addInput: { flex: 1, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 10, maxHeight: 120 },
   addBtn: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
   modalSheet: { maxHeight: '88%', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 16 },

@@ -73,13 +73,6 @@ async function cancelByTag(tag: string) {
   for (const id of toCancel) await Notifications.cancelScheduledNotificationAsync(id);
 }
 
-async function cancelByIdentifier(identifier: string) {
-  if (!isNativeNotificationsAvailable()) return;
-  try {
-    await Notifications.cancelScheduledNotificationAsync(identifier);
-  } catch {}
-}
-
 async function cancelTaskById(taskId: string) {
   if (!isNativeNotificationsAvailable()) return;
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
@@ -99,12 +92,20 @@ export async function syncDailyNotifications(slots: DailyNotificationSlot[]) {
         console.warn('[notifications] permission denied: skip daily notifications');
         return;
       }
-      await Promise.all([
-        cancelByIdentifier('delo_daily_morning'),
-        cancelByIdentifier('delo_daily_evening'),
-        cancelByTag('daily_morning'),
-        cancelByTag('daily_evening'),
-      ]);
+      // Отменяем ВСЕ существующие ежедневные уведомления (по всем возможным идентификаторам и тегам,
+      // включая старые версии приложения которые могли использовать другие идентификаторы).
+      const allScheduled = await Notifications.getAllScheduledNotificationsAsync();
+      // Всё, что не является напоминанием по конкретному делу, считаем ежедневным/устаревшим и пересоздаём заново.
+      const dailyIds = allScheduled
+        .filter((n) => {
+          const id = n.identifier ?? '';
+          const data = n.content?.data as Record<string, unknown> | undefined;
+          const isTaskReminder =
+            data?.tag === TAG_TASK || typeof data?.taskId === 'string' || id.startsWith('delo_task_');
+          return !isTaskReminder;
+        })
+        .map((n) => n.identifier);
+      await Promise.all(dailyIds.map((id) => Notifications.cancelScheduledNotificationAsync(id).catch(() => {})));
 
       const plans = planDailyNotifications(slots);
       const toSchedule = plans.map((plan) =>
